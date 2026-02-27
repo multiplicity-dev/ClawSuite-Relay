@@ -173,6 +173,17 @@ Use this as the canonical chronological log.
   - Relay-channel allowlist optimization in `message_received` deferred to Milestone 2/3 performance pass.
 
 - Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Added outbound debugging instrumentation for `message_sending` troubleshooting.
+- Why: Isolate where assistant text disappears before relay return path to orchestrator.
+- Evidence:
+  - `resolveOutboundContent()` now checks multiple payload fields (`content`, `text`, metadata/payload/message variants, component text arrays)
+  - Optional debug logging via `CLAWSUITE_RELAY_DEBUG_OUTBOUND=1` records channel, content length, and event shape
+  - Outbound capture now skips processing on empty content (warns instead of forwarding empty payload)
+- Risk introduced: Low (diagnostic logging + stricter empty-content guard).
+- Rollback note: remove debug env flag or revert commit after investigation.
+
+- Date/Time: 2026-02-27
 - Author: Claude Code (Opus 4.6)
 - Change: Created `relay_dispatch` tool for OpenClaw plugin API and wired tool registration.
 - Why: Orchestrator agent cannot call `relay_dispatch` without a registered tool — the function existed but was not exposed via the plugin tool system.
@@ -252,8 +263,8 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: Claude Code (Opus 4.6)
-- Change: Identified root cause of return-path failure — `message_sending` never fires for systems-eng outbound responses.
-- Why: After fixing all capture/forward logic and removing the `message_sent` corruption, the return path still doesn't work. Detailed log analysis revealed that `message_sending` simply does not fire for embedded agent run completions (systems-eng's Discord responses).
+- Change: Investigated return-path failure — initial hypothesis was that `message_sending` never fires for embedded agent responses.
+- Why: After fixing all capture/forward logic and removing the `message_sent` corruption, the return path still doesn't work.
 - Evidence (full timeline from 06:27 dispatch):
   ```
   06:27:42.058  dispatch.created (relay_dispatch tool call)
@@ -263,17 +274,28 @@ Use this as the canonical chronological log.
   06:27:43.490  embedded run start: provider=openai-codex model=gpt-5.3-codex
   06:27:43.497  plugin auto-loaded for systems-eng session
   06:27:50.552  embedded run agent end (isError=false, 7s duration)
-  06:27:50.569  lane task done — ZERO message_sending events, ZERO Discord API activity
+  06:27:50.569  lane task done — ZERO message_sending events in plugin logs
   ```
-  - systems-eng received the relay message, processed it for 7 seconds, completed without error, but produced NO outbound Discord message.
-  - No `message_sending` hook fired. No announce triggered. Response was silently consumed.
-  - In earlier tests (around 05:25), systems-eng DID respond visibly in #tech. Behavior may be inconsistent or dependent on session state.
-- Blocking question: **Why does systems-eng's embedded agent run complete without producing a Discord message?** Possible causes:
-  1. The agent produced an empty response (GPT-5.3 decided not to reply)
-  2. The gateway's response delivery mechanism doesn't fire `message_sending` for embedded agent responses (it may be an internal-only hook)
-  3. Some session or plugin configuration suppresses response delivery
-  4. The response was delivered via a different path that bypasses the hook pipeline
-- Status: **Blocking — Milestone 1 capture/forward path cannot work until this is resolved.**
+- Status: Superseded by next entry (root cause identified as empty response content).
+
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Identified actual root cause — systems-eng posts empty-content Discord messages in response to relay dispatches.
+- Why: Gateway source code investigation confirmed `message_sending` DOES fire for all outbound messages including embedded agent responses. The real problem is upstream: the agent's response arrives at Discord with empty content.
+- Evidence:
+  - **Gateway source code analysis:** `deliverOutboundPayloadsCore()` in both `deliver-Equ8Vz8N.js` (gateway) and `deliver-DFWMCouk.js` (embedded agent) runs `message_sending` hooks via `runMessageSending()` for every outbound payload. The hook pipeline is per-delivery-module but initialized from the same plugin registry. `hasHooks("message_sending")` checks `registry.typedHooks.some(h => h.hookName === hookName)`.
+  - **Discord API verification:** Queried Discord REST API via relay bot token (`GET /channels/1474868861525557308/messages?limit=5`). Found messages posted by OpenClaw bot at 06:27:50.902 and 06:14:31 with **completely empty content** — no text, no embeds, no attachments. Both correspond to relay dispatch responses.
+  - **Reframed timeline:** systems-eng DID process the relay message and the gateway DID post a Discord message. But the message content is empty, so: (a) `message_sending` likely fires but the plugin's `if (!content) return` guard bails on empty content, and (b) even without the guard, there is nothing to capture or forward.
+  - **Multiple dispatches affected:** Both the 06:14 and 06:27 dispatches produced empty-content responses. This is a consistent pattern, not a one-off.
+- Blocking question: **Why does systems-eng (GPT-5.3) produce empty response content for relay-dispatched prompts?** Possible causes:
+  1. GPT-5.3 model behavior — the relay message format (with `@mention` and `[relay_dispatch_id:...]` markers) may confuse the model into producing an empty or tool-only response
+  2. OpenClaw delivery pipeline — response content may be stripped or transformed before Discord posting (e.g., if the response is tool-call-only with no assistant text)
+  3. Session/context issue — systems-eng's session state or system prompt may cause it to respond via tool calls rather than text when processing bot-authored messages
+- Next steps to investigate:
+  1. Check systems-eng's session JSONL for the 06:27 dispatch to see the raw model response (did GPT-5.3 produce text that was stripped, or did it produce no text at all?)
+  2. Try a dispatch with simpler content (no markers, no mention) to isolate whether the relay message format causes the empty response
+  3. Check if the `message_sending` hook fires with empty content (add temporary logging that fires regardless of content)
+- Status: **Blocking — root cause is empty response content, not hook wiring. Capture/forward code is correct and ready.**
 
 - Deferred (explicit from live activation):
   - @mention noise: Relay posts `@climbswithgoats` for routing/gating, but `requireMention: false` means it's unnecessary. The mention map currently points to the human user, not the OpenClaw bot.

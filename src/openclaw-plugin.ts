@@ -33,8 +33,41 @@ function resolveRelatedSubagentMessageId(event: any): string | undefined {
   return asString(event?.metadata?.relatedSubagentMessageId) ?? asString(event?.relatedSubagentMessageId);
 }
 
+function resolveOutboundContent(event: any): string {
+  const candidates = [
+    asString(event?.content),
+    asString(event?.text),
+    asString(event?.metadata?.content),
+    asString(event?.payload?.content),
+    asString(event?.message?.content),
+    asString(event?.components?.text)
+  ].filter(Boolean) as string[];
+
+  if (candidates.length > 0) return candidates[0]!;
+
+  const texts = event?.components?.texts;
+  if (Array.isArray(texts)) {
+    const joined = texts.map((t: unknown) => asString(t)).filter(Boolean).join("\n");
+    if (joined.trim()) return joined;
+  }
+
+  return "";
+}
+
+function previewEventShape(event: any): string {
+  const obj = {
+    topKeys: Object.keys(event || {}),
+    hasContent: typeof event?.content === "string",
+    hasText: typeof event?.text === "string",
+    metadataKeys: event?.metadata ? Object.keys(event.metadata) : [],
+    componentKeys: event?.components ? Object.keys(event.components) : []
+  };
+  return JSON.stringify(obj);
+}
+
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
+  const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
   const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
 
   let relayTransport;
@@ -109,8 +142,15 @@ export default function register(api: PluginApi) {
     if (ctx.channelId !== "discord") return;
 
     const channelId = resolveChannelId(event, ctx);
-    const content = asString(event?.content) ?? "";
-    if (!channelId || !content) return;
+    if (!channelId) return;
+
+    const content = resolveOutboundContent(event);
+
+    if (debugOutbound) {
+      api.logger.info?.(
+        `clawsuite-relay: message_sending debug channel=${channelId} content_len=${content.length} shape=${previewEventShape(event)}`
+      );
+    }
 
     // Outbound capture: if this message is going to a subagent channel with
     // a pending dispatch, capture the response and forward to orchestrator.
@@ -118,19 +158,25 @@ export default function register(api: PluginApi) {
     if (relayEnabled) {
       const targetAgentId = reverseChannelMap[channelId];
       if (targetAgentId) {
-        try {
-          const result = await captureOutboundResponse(
-            { targetAgentId, content },
-            { forwardTransport }
+        if (!content) {
+          api.logger.warn?.(
+            `clawsuite-relay: outbound candidate for ${targetAgentId} had empty content (channel=${channelId})`
           );
-          if (result.status === "processed") {
-            api.logger.info?.(`clawsuite-relay: outbound capture forwarded dispatch ${result.dispatchId}`);
+        } else {
+          try {
+            const result = await captureOutboundResponse(
+              { targetAgentId, content },
+              { forwardTransport }
+            );
+            if (result.status === "processed") {
+              api.logger.info?.(`clawsuite-relay: outbound capture forwarded dispatch ${result.dispatchId}`);
+            }
+            if (result.status === "failed") {
+              api.logger.warn?.(`clawsuite-relay: outbound capture failed for dispatch ${result.dispatchId}`);
+            }
+          } catch (err) {
+            api.logger.warn?.(`clawsuite-relay: outbound capture error (${String(err)})`);
           }
-          if (result.status === "failed") {
-            api.logger.warn?.(`clawsuite-relay: outbound capture failed for dispatch ${result.dispatchId}`);
-          }
-        } catch (err) {
-          api.logger.warn?.(`clawsuite-relay: outbound capture error (${String(err)})`);
         }
       }
     }
