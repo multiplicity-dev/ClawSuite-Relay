@@ -3,11 +3,20 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { relay_dispatch } from "../src/index.js";
-import { getDispatchDir, loadDispatch } from "../src/state.js";
+
+const testDir = await mkdtemp(join(tmpdir(), "clawsuite-relay-test-"));
+process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
+process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
+
+const { relay_dispatch } = await import("../src/index.js");
+const { loadDispatch } = await import("../src/state.js");
+
+test.after(async () => {
+  await rm(testDir, { recursive: true, force: true });
+});
 
 test("rejects unmapped target", async () => {
-  const res = await relay_dispatch({ targetAgentId: "ceo", task: "hello" });
+  const res = await relay_dispatch({ targetAgentId: "orchestrator", task: "hello" });
   assert.equal(res.status, "rejected");
   assert.equal(res.code, "TARGET_UNMAPPED");
 });
@@ -27,4 +36,27 @@ test("accepted dispatch is persisted", async () => {
   assert.ok(stored);
   assert.equal(stored?.targetAgentId, "systems-eng");
   assert.equal(stored?.state, "CREATED");
+});
+
+test("duplicate requestId returns existing dispatch", async () => {
+  const first = await relay_dispatch({
+    targetAgentId: "systems-eng",
+    task: "same",
+    requestId: "req-123"
+  });
+  const second = await relay_dispatch({
+    targetAgentId: "systems-eng",
+    task: "same",
+    requestId: "req-123"
+  });
+
+  assert.equal(first.status, "accepted");
+  assert.equal(second.status, "accepted");
+  assert.equal(first.dispatchId, second.dispatchId);
+  assert.match(second.message, /idempotent/i);
+});
+
+test("invalid dispatchId path traversal is rejected", async () => {
+  const traversal = await loadDispatch("../../etc/passwd");
+  assert.equal(traversal, null);
 });

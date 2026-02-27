@@ -31,3 +31,16 @@ Use this as the canonical chronological log.
 - Risk introduced: Low-medium (skeleton may require interface refinements once live Discord wiring begins).
 - Rollback note: Revert this milestone commit; no runtime integrations deployed yet.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Addressed audit findings from Claude Code review.
+- Why: Close quality gaps before wiring transport integration.
+- Evidence:
+  - Implemented `requestId` idempotency replay in `relay_dispatch`
+  - Added test isolation via `CLAWSUITE_RELAY_DISPATCH_DIR` temp directory override
+  - Added dispatchId validation in `loadDispatch` to block traversal-style ids
+  - Fixed build config (`rootDir=src`, tests excluded from dist emit)
+  - Added optional log suppression in tests (`CLAWSUITE_RELAY_SILENT_LOGS=1`)
+- Risk introduced: Low (contained changes, expanded tests).
+- Rollback note: Revert this follow-up commit; previous skeleton remains intact.
+

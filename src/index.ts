@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { logRelay } from "./logger.js";
-import { saveDispatch } from "./state.js";
+import { findDispatchByRequestId, saveDispatch } from "./state.js";
 import {
   RELAY_CODES,
   V1_TARGET_AGENT,
@@ -31,6 +31,23 @@ export async function relay_dispatch(
       message: `v1 only supports targetAgentId=${V1_TARGET_AGENT}`,
       retryable: false
     };
+  }
+
+  if (request.requestId?.trim()) {
+    const existing = await findDispatchByRequestId(request.requestId);
+    if (existing) {
+      logRelay("dispatch.idempotent_hit", {
+        dispatchId: existing.dispatchId,
+        requestId: request.requestId,
+        targetAgentId: existing.targetAgentId
+      });
+      return {
+        status: "accepted",
+        dispatchId: existing.dispatchId,
+        message: "dispatch accepted (idempotent replay)",
+        retryable: false
+      };
+    }
   }
 
   const now = new Date().toISOString();
