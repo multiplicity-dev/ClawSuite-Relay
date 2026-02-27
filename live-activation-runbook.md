@@ -9,8 +9,11 @@ Round trip confirmed at `a9606d9`: orchestrator dispatches → relay bot posts t
 **Issue 1 — RESOLVED: duplicate forward.**
 Two hooks (`before_message_write` and `agent_end`) both fired for the same response within 121ms. Fix: use only one capture hook. Tested with `agent_end` removed — single forward confirmed (dispatchId `537a94a5`).
 
-**Issue 2 — RESOLVED: assistant text capture.**
-`agent_end` provides full session messages array. `extractCurrentTurnContent` scopes to current turn (last user message boundary), extracts `role: "toolResult"` (OpenClaw-specific) and assistant messages. Array content handled via `extractAssistantTextFromAgentMessage`. CEO confirmed tool outputs (hostname) visible in relay forward but NOT in subagent channel. Remaining: omit redundant channel response, handle >2000 char payloads.
+**Issue 2 — PARTIALLY RESOLVED: assistant text capture.**
+`agent_end` with `extractCurrentTurnContent` captures tool results + assistant text from current turn. CEO confirmed tool outputs (hostname) visible in relay forward. Remaining issues:
+- Forward payloads >2000 chars hit Discord limit (needs message splitting)
+- Content scope: captures tool results + all assistant messages including channel response. Whether to omit channel response TBD.
+- `extractLastAssistantText` tested and confirmed insufficient — returns only channel-visible text.
 
 **Issue 3 — relay envelope visible in orchestrator channel (cosmetic, deferred).**
 The relay bot's forwarded message is visible to the human in #general. Auto-delete was considered but correlated with the start of GPT's failure cascade — approach avoided for now.

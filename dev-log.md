@@ -454,4 +454,41 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Channel-visible response is included in forward (redundant — CEO sees it in both layers). Next change: omit last assistant message.
   - Tool-heavy responses may exceed 2000-char Discord limit. Will need message splitting.
   - Relay envelope formatting needs cleanup.
+  - **Post-phase-1: align forwarded content with native OpenClaw orchestrator→subagent response format.** Currently forwarding tool results + intermediate assistant text + channel response (all from current turn). Should match what the orchestrator natively receives from embedded subagent sessions. No docs found — requires OpenClaw gateway source investigation.
+
+**Change 6: Reverted to `extractLastAssistantText` — FAILED (channel text only)**
+- Per relay-bot-plan.md "Layer 2: assistant text", reverted to last-assistant-only extraction.
+- Live test confirmed: last assistant message IS the channel-visible response. No richer layer.
+- The plan's "richer than short summaries" refers to relay giving actual response vs. today's status-line completion announce — not a hidden richer assistant message.
+- Reverted back to `extractCurrentTurnContent` which delivers tool results + all assistant text from the current turn. This is the version CEO confirmed working.
+
+**Change 7: Attempted channel response omission — NOT TESTED, reverted**
+- Added logic to skip last assistant message (channel response) from forward.
+- Deployed but reverted before meaningful testing due to CEO session bloat (12MB, same pattern as CTO failure at 11.7MB).
+- Deferred: whether channel response should be included or omitted in forward.
+
+### Handoff state (commit `a09c21e`, branch `top-down-cleanup`)
+
+**What works:**
+- Relay loop: dispatch → post to subagent channel → capture response → forward to orchestrator
+- Disk-persisted arming survives plugin re-initialization across sessions
+- `agent_end` with `extractCurrentTurnContent`: captures tool results (`role: "toolResult"`) + all assistant messages from current turn
+- Duplicate forward resolved (single capture hook)
+- Echo prevention (relay bot user ID filter + envelope content guards)
+- 30/30 tests passing
+
+**What doesn't work yet:**
+- Forward payloads >2000 chars fail (Discord limit). Needs message splitting in `DiscordForwardTransport`.
+- Relay envelope visible in orchestrator channel (cosmetic — auto-delete deferred per user instruction)
+- Content format alignment: plan says "Layer 2 assistant text" but empirically the last assistant message = channel text. `extractCurrentTurnContent` delivers more (tool results + intermediate reasoning). Correct scope TBD.
+
+**Key OpenClaw-specific findings (hard-won, preserve these):**
+1. Plugin re-initialized per agent session — in-memory state doesn't survive. Use disk persistence.
+2. `role: "toolResult"` not `"tool"` — OpenClaw's message format differs from OpenAI/Anthropic.
+3. `message.content` can be array — use `extractAssistantTextFromAgentMessage` not `asString`.
+4. `message_sending` does NOT fire for embedded agent responses.
+5. `before_message_write` only captures Discord-visible text (truncated), not full response.
+6. `agent_end` provides full session history (all turns), not just current turn — must scope extraction.
+7. `message_sent` registration corrupts hook runner — do not use.
+8. CEO session bloat at ~12MB causes same unresponsive pattern as CTO at 11.7MB (model-independent).
 
