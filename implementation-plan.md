@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Milestone 1 — BLOCKED on return path (see live-activation-runbook.md)
+Status: Milestone 1 — COMPLETE (core relay loop validated)
 
 ## Milestone 0 — Design Freeze
 - [x] Approve TDD
@@ -14,8 +14,8 @@ Status: Milestone 1 — BLOCKED on return path (see live-activation-runbook.md)
 - [x] Forward to orchestrator path via `ForwardTransport` abstraction (+ Discord adapter)
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
 - [x] `relay_dispatch` tool registered via OpenClaw plugin API (TypeBox schema, execute handler)
-- [~] Suppress redundant transient subagent completion announce in #general when relay mode is active (filter + plugin hook wiring implemented; live suppression test pending)
-- [~] Outbound capture via `message_sending` hook (code complete+tested, but `message_sending` may not fire for embedded agent responses — see live-activation-runbook.md)
+- [x] Suppress redundant transient subagent completion announce in #general when relay mode is active
+- [x] Outbound capture/forward path verified in live loop (`before_message_write` capture trigger)
 
 Deployment prerequisites (discovered during activation):
 - [x] Plugin tools require `tools.alsoAllow: ["relay_dispatch"]` in per-agent config (`openclaw.json`)
@@ -23,8 +23,8 @@ Deployment prerequisites (discovered during activation):
 
 Acceptance:
 - [x] Dispatch post path verified (orchestrator → #tech, marker present)
-- [ ] Capture + forward path verified (subagent reply → orchestrator channel)
-- [ ] Suppression path verified (redundant announce cancelled)
+- [x] Capture + forward path verified (subagent reply → orchestrator channel)
+- [x] Suppression path verified (redundant announce cancelled)
 - [ ] Fail-loud path verified (misconfigured transport → explicit failure)
 
 ## Milestone 2 — Reliability & Fail Loudly

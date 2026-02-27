@@ -174,6 +174,14 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Added operator-safety note from live incident: bot-originated relay envelopes can be misread as user approvals.
+- Why: Prevent unsafe control actions (e.g., restart) triggered by non-human relay messages.
+- Evidence: restart-approval style messages arrived from `ClawSuite-Relay` sender id, not president sender id, and were initially interpreted as authorization.
+- Mitigation now: control actions require approval from president sender id only; relay-bot messages are treated as diagnostics/data.
+- Future work: add explicit sender-trust policy to SOUL/agent guidance + optional control-action guard in plugin/runtime.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Added outbound debugging instrumentation for `message_sending` troubleshooting.
 - Why: Isolate where assistant text disappears before relay return path to orchestrator.
 - Evidence:
@@ -219,6 +227,18 @@ Use this as the canonical chronological log.
   - Existing relay marker/signature guard retained.
 - Risk introduced: Low (narrowly scoped ignore rules).
 - Rollback note: revert guard commit if legitimate non-bot messages are unexpectedly ignored.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Milestone 1 live validation completed successfully.
+- Why: Confirm production-like relay loop is stable before moving to next phase.
+- Evidence:
+  - Dispatch `83244379-93a6-4d48-b223-f35f715f16ae` round-trip passed.
+  - Correct dispatch correlation ID observed end-to-end.
+  - Single forwarded response; no echo duplication; no stale queue pickup.
+  - Orchestrator confirmed correct payload receipt.
+- Risk introduced: Low.
+- Rollback note: if regressions recur, disable plugin and rerun known-good probe matrix.
 
 - Date/Time: 2026-02-27
 - Author: Claude Code (Opus 4.6)
