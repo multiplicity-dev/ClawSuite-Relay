@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { logRelay } from "./logger.js";
-import { findDispatchByRequestId, saveDispatch, updateDispatch } from "./state.js";
+import { findDispatchByRequestId, saveDispatch, setArmedDispatch, updateDispatch } from "./state.js";
 import { UnconfiguredRelayTransport, type RelayTransport } from "./transport.js";
 import {
   RELAY_CODES,
@@ -109,6 +109,7 @@ export async function relay_dispatch(
       state: "POSTED_TO_CHANNEL",
       postedMessageId: post.messageId
     });
+    await setArmedDispatch(request.targetAgentId, dispatchId);
 
     logRelay("dispatch.posted", {
       dispatchId,

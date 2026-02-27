@@ -358,3 +358,100 @@ Use this as the canonical chronological log.
   - @mention noise: Relay posts `@climbswithgoats` for routing/gating, but `requireMention: false` means it's unnecessary. The mention map currently points to the human user, not the OpenClaw bot.
   - Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional but noisy for casual reading.
 
+---
+
+## Phase 1 troubleshooting session (2026-02-27, Claude Code Opus 4.6 + Dave)
+
+### Context
+GPT-5.3 (systems-eng/CTO) made 14 commits after Claude Code's baseline (`d48b633`).
+The loop was reported working during GPT's session but then lost while chasing the echo/duplicate issue.
+CTO became unresponsive (bloated 11.7MB session at 93% context; compaction timed out).
+Dave and Claude Code regrouped to find the working state and strip to minimum.
+
+### Key discoveries
+
+**1. CTO unresponsive — bloated session, not plugin bug**
+- CTO's session JSONL was 11.7MB, 253k/272k tokens (93% context).
+- Compaction timed out at 600s, blocking all new messages.
+- Fix: moved session file aside, restarted gateway. CTO came back with fresh session.
+- Discord chat history preserved; only in-session agent memory lost.
+
+**2. In-memory arming is fundamentally broken**
+- Plugin is re-initialized per agent session (confirmed by gateway logs showing fresh `reverse channel map` entries after dispatch).
+- In-memory `Map<string, ArmedDispatch>` in one plugin instance is invisible to the instance that handles `before_message_write`.
+- This affects commits `85bce9c` through `3c4558e` — none can complete the loop in live testing.
+- Evidence: gateway logs show `message_received` at T+0, then `plugins.allow...clawsuite-relay` (fresh load) at T+2s, then `before_message_write` warnings in the new instance with no capture log output.
+
+**3. Disk-persisted arming at dispatch time is the fix (commit `a9606d9`)**
+- `relay_dispatch` writes `armed/<agentId>.json` to disk after posting to channel.
+- `before_message_write` in the CTO's fresh plugin instance reads this file.
+- Confirmed working: dispatchId `c918869d`, round trip in <5 seconds.
+
+**4. Duplicate forward caused by `agent_end` + `before_message_write` race**
+- Both hooks fire within 121ms of each other for the same CTO response.
+- Both find the dispatch in capturable state, both forward to orchestrator.
+- Log evidence:
+  ```
+  11:41:17.353  before_message_write captured → forwardedMessageId ...21748
+  11:41:17.474  agent_end captured            → forwardedMessageId ...33597
+  ```
+- Fix: remove `agent_end` hook. `before_message_write` is the reliable primary path.
+
+**5. `message_sending` confirmed NOT firing for embedded agent responses**
+- Across all test sessions, zero `message_sending debug` entries for the CTO channel.
+- `message_sending` only fires for gateway-originated messages (CEO channel).
+
+**6. `message.content` can be an array**
+- `extractAssistantTextFromAgentMessage()` handles string, array of content parts, and `message.parts`.
+- Using only `asString(event?.message?.content)` misses array-format content — this is why earlier attempts with simplified content extraction failed.
+
+### Commits tested during this session
+
+| Commit | Live test result |
+|--------|-----------------|
+| `9289028` | Loop incomplete — in-memory arming, echo prevention blocks arming |
+| `3c4558e` | Loop incomplete — arming moved before echo prevention but still in-memory |
+| `a9606d9` | **Loop works** — disk-persisted arming. Duplicate forward (agent_end + before_message_write race) |
+
+### Changes from `a9606d9` baseline (in order, one variable at a time)
+
+**Change 1: Remove `agent_end` hook (keep `before_message_write` only)**
+- Result: duplicate forward RESOLVED. Single message forwarded (dispatchId `537a94a5`).
+- New issue found: `before_message_write` only captures Discord-visible text (`content_len=54`), not the CTO's full response. CEO reported receiving only the channel printout, not the substantive assistant text.
+
+**Change 2: Replace `before_message_write` with `agent_end` as sole capture path — FAILED (same content)**
+- Hypothesis: `agent_end` receives the full message array from the agent turn. `extractLastAssistantText` walks the array to find the complete final assistant response.
+- Result: **Same outcome as `before_message_write`.** The forwarded content is still just the CTO's channel-visible response text, not the full session content.
+- Root cause: `extractLastAssistantText` correctly finds the last `role: "assistant"` message — but that IS the channel-visible response. The agent's final assistant message is what it chose to write as its Discord reply. Tool call outputs (uname, df, openclaw status) are in separate `role: "tool"` / tool_result messages earlier in the array.
+- CEO confirmed: "this is still just the channel-visible text, wrapped in the relay envelope. The raw uname -a output, df -h / output, and openclaw status output that CTO ran are NOT in what I received."
+- Conclusion: Neither `before_message_write` nor `agent_end`'s last-assistant-only extraction solves the content problem. The `agent_end` messages array DOES contain all session content (tool calls, tool results, assistant reasoning), but `extractLastAssistantText` only pulls the final assistant message. Need to extract ALL relevant content from the messages array.
+
+**Change 3: `extractFullSessionContent` — walks all messages — FAILED (full session dump)**
+- `agent_end` provides the ENTIRE session history, not just the current turn.
+- `extractFullSessionContent` walked all messages forward, skipping only the first user message. Result: every prior relay response + tool output concatenated. Produced 2325-2378 chars even for simple prompts, hitting 2000-char Discord limit.
+- Even when content fit, CEO confirmed: "the relay is capturing CTO's full session context, not just the response to this specific dispatch."
+
+**Change 4: `extractCurrentTurnContent` — scoped to last turn — FAILED (wrong role name)**
+- Attempted to fix Change 3 by walking backward to find the last plain user message and extracting only what follows.
+- Turn scoping logic worked (found correct boundary). But tool results were missed entirely.
+- **Key discovery from logs: OpenClaw uses `role: "toolResult"`, NOT `role: "tool"`.** The extraction checked for `"tool"` (OpenAI format) and `"user"` with `tool_result` blocks (Anthropic format), but OpenClaw has its own role name.
+- Log evidence: `roles=["user","assistant",...,"toolResult","assistant","user","assistant","toolResult","toolResult","toolResult","assistant",...]`
+- Extracted content was `[[reply_to_current]] Done.` (26 chars) — only the last assistant message, tool outputs dropped.
+- Also deployed message-split code in forward transport (untested independently — violated one-variable-at-a-time).
+
+**Rollback to `extractLastAssistantText` (Change 2 state)**
+- Changes 3 and 4 do not work independently. Rolling back to known working state.
+- The `toolResult` role discovery is preserved for next attempt at full-session extraction.
+
+**Change 5: `extractCurrentTurnContent` with correct role + content handling — WORKS**
+- Combined three fixes discovered through Changes 3-4:
+  1. Scope to current turn only (walk backward to last `role: "user"` message)
+  2. Handle OpenClaw's `role: "toolResult"` (not `"tool"`)
+  3. Handle array content format via `extractAssistantTextFromAgentMessage` (not `asString`)
+- Live test result (dispatchId `443682d6`): `content_len=51`, CEO received both tool output ("montblanc" from hostname) AND channel text ("Checked."). CEO confirmed: "Assistant text is coming through!"
+- Second test (dispatchId `2a8c4f00`): CEO confirmed hostname visible in relay but NOT in #it channel. Proof that session-layer content is being forwarded.
+- Known remaining issues:
+  - Channel-visible response is included in forward (redundant — CEO sees it in both layers). Next change: omit last assistant message.
+  - Tool-heavy responses may exceed 2000-char Discord limit. Will need message splitting.
+  - Relay envelope formatting needs cleanup.
+

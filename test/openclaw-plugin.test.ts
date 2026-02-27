@@ -13,7 +13,7 @@ process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
-const { saveDispatch, loadDispatch } = await import("../src/state.js");
+const { saveDispatch, loadDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -36,7 +36,8 @@ test("registers hooks and relay_dispatch tool", () => {
 
   assert.equal(typeof hooks.message_received, "function");
   assert.equal(typeof hooks.message_sending, "function");
-  assert.equal(typeof hooks.before_message_write, "function");
+  assert.equal(typeof hooks.agent_end, "function");
+  assert.equal(hooks.before_message_write, undefined, "before_message_write removed — only captures Discord-visible text, not full response");
   assert.equal(tools.length, 1);
   assert.equal(tools[0].tool.name, "relay_dispatch");
   assert.equal(typeof tools[0].tool.execute, "function");
@@ -99,7 +100,7 @@ test("message_sending cancels transient announce when correlated dispatch exists
   assert.deepEqual(result, { cancel: true });
 });
 
-test("before_message_write captures only after dispatch is armed", async () => {
+test("agent_end captures only after dispatch is armed", async () => {
   const dispatchId = "00000000-0000-1000-8000-000000000077";
   await saveDispatch({
     dispatchId,
@@ -114,35 +115,23 @@ test("before_message_write captures only after dispatch is armed", async () => {
   const { api, hooks } = createMockApi();
   register(api);
 
+  // Ensure no prior arming residue from other tests.
+  await clearArmedDispatch("systems-eng");
+
   // Without arming, should no-op.
-  const noArm = await hooks.before_message_write(
-    {
-      message: { role: "assistant", content: "here is my analysis" },
-      agentId: "systems-eng"
-    },
+  const noArm = await hooks.agent_end(
+    { messages: [{ role: "assistant", content: "here is my analysis" }] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
   assert.equal(noArm, undefined);
   const stillPending = await loadDispatch(dispatchId);
   assert.equal(stillPending?.state, "POSTED_TO_CHANNEL");
 
-  // Arm via inbound relay dispatch message in mapped channel.
-  await hooks.message_received(
-    {
-      content: `<@794579141801934879> task [relay_dispatch_id:${dispatchId}]`,
-      metadata: {
-        channelId: "9999999999999999999",
-        messageId: "posted-plugin-outbound-1"
-      }
-    },
-    { channelId: "discord", conversationId: "9999999999999999999" }
-  );
+  // Arm directly via persistent state (relay_dispatch now sets this in runtime).
+  await setArmedDispatch("systems-eng", dispatchId);
 
-  const armed = await hooks.before_message_write(
-    {
-      message: { role: "assistant", content: "here is my analysis" },
-      agentId: "systems-eng"
-    },
+  const armed = await hooks.agent_end(
+    { messages: [{ role: "assistant", content: "here is my analysis" }] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
 

@@ -2,8 +2,7 @@ import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
 import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
-import { extractRelayDispatchId } from "./markers.js";
-import { loadDispatch } from "./state.js";
+import { clearArmedDispatch, getArmedDispatch } from "./state.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -122,6 +121,40 @@ function extractAssistantTextFromAgentMessage(message: any): string {
   return "";
 }
 
+function extractCurrentTurnContent(messages: any[]): string {
+  // Find the start of the current turn: walk backward to the last plain user
+  // message (the relay prompt). Everything after it is the current turn.
+  let turnStart = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const role = asString(messages[i]?.role);
+    if (role === "user") {
+      turnStart = i + 1;
+      break;
+    }
+  }
+
+  const sections: string[] = [];
+  for (let i = turnStart; i < messages.length; i++) {
+    const msg = messages[i];
+    const role = asString(msg?.role);
+
+    // OpenClaw uses "toolResult", OpenAI uses "tool". Content can be string or array.
+    if (role === "toolResult" || role === "tool") {
+      const text = extractAssistantTextFromAgentMessage(msg);
+      if (text) sections.push(text);
+      continue;
+    }
+
+    if (role === "assistant") {
+      const text = extractAssistantTextFromAgentMessage(msg);
+      if (text) sections.push(text);
+      continue;
+    }
+  }
+
+  return sections.join("\n\n");
+}
+
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
@@ -164,28 +197,28 @@ export default function register(api: PluginApi) {
 
   api.logger.info?.(`clawsuite-relay: reverse channel map: ${JSON.stringify(reverseChannelMap)}`);
 
-  const armedDispatchByAgent = new Map<string, { dispatchId: string; armedAt: number }>();
   const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 300000);
 
-  function armDispatch(agentId: string, dispatchId: string) {
-    armedDispatchByAgent.set(agentId, { dispatchId, armedAt: Date.now() });
-  }
-
-  function getArmedDispatchId(agentId: string): string | undefined {
-    const armed = armedDispatchByAgent.get(agentId);
+  async function getArmedDispatchId(agentId: string): Promise<string | undefined> {
+    const armed = await getArmedDispatch(agentId);
     if (!armed) return undefined;
-    if (Date.now() - armed.armedAt > armTtlMs) {
-      armedDispatchByAgent.delete(agentId);
+    const ts = Date.parse(armed.armedAt || "");
+    if (!Number.isNaN(ts) && Date.now() - ts > armTtlMs) {
+      await clearArmedDispatch(agentId);
       return undefined;
     }
     return armed.dispatchId;
   }
 
-  function disarmDispatch(agentId: string, dispatchId?: string) {
-    const armed = armedDispatchByAgent.get(agentId);
+  async function disarmDispatch(agentId: string, dispatchId?: string) {
+    if (!dispatchId) {
+      await clearArmedDispatch(agentId);
+      return;
+    }
+    const armed = await getArmedDispatch(agentId);
     if (!armed) return;
-    if (!dispatchId || armed.dispatchId === dispatchId) {
-      armedDispatchByAgent.delete(agentId);
+    if (armed.dispatchId === dispatchId) {
+      await clearArmedDispatch(agentId);
     }
   }
 
@@ -209,15 +242,6 @@ export default function register(api: PluginApi) {
     if (content.includes("[relay_subagent_message_id:")) return;
     if (content.startsWith("Subagent response received for ")) return;
 
-    // Arm dispatch capture when a relay dispatch marker is observed in a mapped subagent channel.
-    const markerDispatchId = extractRelayDispatchId(content);
-    if (markerDispatchId && reverseChannelMap[channelId]) {
-      const markerDispatch = await loadDispatch(markerDispatchId);
-      if (markerDispatch && markerDispatch.targetAgentId === reverseChannelMap[channelId]) {
-        armDispatch(markerDispatch.targetAgentId, markerDispatch.dispatchId);
-      }
-    }
-
     try {
       const result = await captureSubagentResponse(
         {
@@ -240,22 +264,21 @@ export default function register(api: PluginApi) {
     }
   });
 
-  // Capture assistant text before write as a reliable fallback when outbound hooks vary.
-  api.on("before_message_write", async (event, ctx) => {
+  // Primary capture path: agent_end fires once per agent turn with the full
+  // message array. Extracts ALL session content (tool results + assistant text),
+  // not just the final Discord-visible response.
+  api.on("agent_end", async (event, ctx) => {
     if (!relayEnabled) return;
-
     const targetAgentId = asString(ctx?.agentId);
     if (!targetAgentId) return;
     if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
 
-    const role = asString(event?.message?.role);
-    if (role && role !== "assistant") return;
-
-    const content = extractAssistantTextFromAgentMessage(event?.message);
-    if (!content) return;
-
-    const armedDispatchId = getArmedDispatchId(targetAgentId);
+    const armedDispatchId = await getArmedDispatchId(targetAgentId);
     if (!armedDispatchId) return;
+
+    const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
+    const content = extractCurrentTurnContent(msgs);
+    if (!content) return;
 
     try {
       const result = await captureOutboundResponse(
@@ -263,14 +286,14 @@ export default function register(api: PluginApi) {
         { forwardTransport }
       );
       if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: before_message_write captured dispatch ${result.dispatchId}`);
-        disarmDispatch(targetAgentId, result.dispatchId);
+        api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId} content_len=${content.length}`);
+        await disarmDispatch(targetAgentId, result.dispatchId);
       }
       if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: before_message_write capture failed for dispatch ${result.dispatchId}`);
+        api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
       }
     } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: before_message_write capture error (${String(err)})`);
+      api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
     }
   });
 
