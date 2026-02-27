@@ -250,6 +250,17 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Added `agent_end` fallback capture path for reliability.
+- Why: Outbound message hooks proved inconsistent in live runtime; `agent_end` offers a deterministic per-run fallback for assistant text capture.
+- Evidence:
+  - New `agent_end` hook captures last assistant text from run messages when dispatch is armed.
+  - Uses same dispatchId-gated capture path + disarm logic.
+  - Plugin tests updated to assert `agent_end` hook registration.
+- Risk introduced: Medium (duplicate-capture race possible if both hooks fire; mitigated by dispatch state gate).
+- Rollback note: revert `agent_end` fallback if it introduces noisy duplicates.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:

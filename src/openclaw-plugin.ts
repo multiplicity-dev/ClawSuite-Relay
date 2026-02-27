@@ -122,6 +122,17 @@ function extractAssistantTextFromAgentMessage(message: any): string {
   return "";
 }
 
+function extractLastAssistantText(messages: any[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    const role = asString(msg?.role);
+    if (role !== "assistant") continue;
+    const text = extractAssistantTextFromAgentMessage(msg);
+    if (text) return text;
+  }
+  return "";
+}
+
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
@@ -237,6 +248,37 @@ export default function register(api: PluginApi) {
       }
     } catch (err) {
       api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
+    }
+  });
+
+  // Fallback capture at agent_end in case outbound message hooks are inconsistent.
+  api.on("agent_end", async (event, ctx) => {
+    if (!relayEnabled) return;
+    const targetAgentId = asString(ctx?.agentId);
+    if (!targetAgentId) return;
+    if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
+
+    const armedDispatchId = getArmedDispatchId(targetAgentId);
+    if (!armedDispatchId) return;
+
+    const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
+    const content = extractLastAssistantText(msgs);
+    if (!content) return;
+
+    try {
+      const result = await captureOutboundResponse(
+        { targetAgentId, content, dispatchId: armedDispatchId },
+        { forwardTransport }
+      );
+      if (result.status === "processed") {
+        api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId}`);
+        disarmDispatch(targetAgentId, result.dispatchId);
+      }
+      if (result.status === "failed") {
+        api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
+      }
+    } catch (err) {
+      api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
     }
   });
 
