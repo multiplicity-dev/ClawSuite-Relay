@@ -13,7 +13,7 @@ process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
-const { saveDispatch } = await import("../src/state.js");
+const { saveDispatch, loadDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -99,8 +99,7 @@ test("message_sending cancels transient announce when correlated dispatch exists
   assert.deepEqual(result, { cancel: true });
 });
 
-test("before_message_write attempts outbound capture for mapped subagent", async () => {
-  // Create a pending dispatch targeting systems-eng.
+test("before_message_write captures only after dispatch is armed", async () => {
   const dispatchId = "00000000-0000-1000-8000-000000000077";
   await saveDispatch({
     dispatchId,
@@ -115,20 +114,39 @@ test("before_message_write attempts outbound capture for mapped subagent", async
   const { api, hooks } = createMockApi();
   register(api);
 
-  // Simulate assistant message write in systems-eng session.
-  const result = await hooks.before_message_write(
+  // Without arming, should no-op.
+  const noArm = await hooks.before_message_write(
     {
-      message: {
-        role: "assistant",
-        content: "here is my analysis"
-      },
+      message: { role: "assistant", content: "here is my analysis" },
+      agentId: "systems-eng"
+    },
+    { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
+  );
+  assert.equal(noArm, undefined);
+  const stillPending = await loadDispatch(dispatchId);
+  assert.equal(stillPending?.state, "POSTED_TO_CHANNEL");
+
+  // Arm via inbound relay dispatch message in mapped channel.
+  await hooks.message_received(
+    {
+      content: `<@794579141801934879> task [relay_dispatch_id:${dispatchId}]`,
+      metadata: {
+        channelId: "9999999999999999999",
+        messageId: "posted-plugin-outbound-1"
+      }
+    },
+    { channelId: "discord", conversationId: "9999999999999999999" }
+  );
+
+  const armed = await hooks.before_message_write(
+    {
+      message: { role: "assistant", content: "here is my analysis" },
       agentId: "systems-eng"
     },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
 
-  // Hook is observational; it should not block/modify write.
-  assert.equal(result, undefined);
+  assert.equal(armed, undefined);
 });
 
 test("relay_dispatch tool executes dispatch with mock transport", async () => {

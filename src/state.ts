@@ -90,27 +90,41 @@ export async function findDispatchBySubagentResponseMessageId(
 }
 
 export async function findPendingDispatchForAgent(
-  targetAgentId: string
+  targetAgentId: string,
+  opts: { maxAgeMs?: number } = {}
 ): Promise<DispatchRecord | null> {
   if (!targetAgentId?.trim()) return null;
   await ensureDispatchDir();
   const files = await readdir(getDispatchDir());
+  const now = Date.now();
+  const maxAgeMs = opts.maxAgeMs;
+  let best: DispatchRecord | null = null;
+
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
     try {
       const raw = await readFile(join(getDispatchDir(), file), "utf8");
       const parsed = JSON.parse(raw) as DispatchRecord;
-      if (
-        parsed.targetAgentId === targetAgentId &&
-        parsed.state === "POSTED_TO_CHANNEL"
-      ) {
-        return parsed;
+      if (parsed.targetAgentId !== targetAgentId) continue;
+      if (parsed.state !== "POSTED_TO_CHANNEL") continue;
+
+      if (typeof maxAgeMs === "number") {
+        const ts = Date.parse(parsed.updatedAt || parsed.createdAt || "");
+        if (!Number.isNaN(ts) && now - ts > maxAgeMs) continue;
+      }
+
+      if (!best) {
+        best = parsed;
+      } else {
+        const a = Date.parse(parsed.updatedAt || parsed.createdAt || "") || 0;
+        const b = Date.parse(best.updatedAt || best.createdAt || "") || 0;
+        if (a > b) best = parsed;
       }
     } catch {
       // ignore malformed/unreadable files in v1
     }
   }
-  return null;
+  return best;
 }
 
 export async function findDispatchByRequestId(

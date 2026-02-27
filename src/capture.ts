@@ -93,6 +93,7 @@ export async function captureSubagentResponse(
 export interface OutboundCaptureEvent {
   targetAgentId: string;
   content: string;
+  dispatchId?: string;
 }
 
 export async function captureOutboundResponse(
@@ -101,7 +102,16 @@ export async function captureOutboundResponse(
 ): Promise<CaptureResult> {
   const forwardTransport = deps.forwardTransport ?? new UnconfiguredForwardTransport();
 
-  const dispatch = await findPendingDispatchForAgent(event.targetAgentId);
+  let dispatch = event.dispatchId ? await loadDispatch(event.dispatchId) : null;
+  if (dispatch && (dispatch.targetAgentId !== event.targetAgentId || dispatch.state !== "POSTED_TO_CHANNEL")) {
+    dispatch = null;
+  }
+
+  if (!dispatch) {
+    const maxAgeMs = Number(process.env.CLAWSUITE_RELAY_PENDING_TTL_MS || 300000);
+    dispatch = await findPendingDispatchForAgent(event.targetAgentId, { maxAgeMs });
+  }
+
   if (!dispatch) return { status: "ignored", reason: "no_pending_dispatch" };
 
   try {
