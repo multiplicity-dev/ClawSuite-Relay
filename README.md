@@ -21,21 +21,35 @@ npm run build
 
 Current implementation status: Milestone 1 live activation in progress (dispatch path verified, capture/forward/suppression live tests pending).
 
+## Prerequisite: Create a second Discord bot
+
+ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages (self-message filter), so a second bot identity is needed for relay messages to be visible to subagent sessions.
+
+1. Go to https://discord.com/developers/applications → "New Application"
+2. Name it (e.g., "ClawSuite-Relay")
+3. Go to Bot tab → "Reset Token" → copy the token
+4. Go to OAuth2 → URL Generator → select `bot` scope → set permissions to `2048` (Send Messages)
+5. Use the generated invite URL to add the bot to your Discord server
+6. Decode the bot's user ID for config: `echo -n "<token_prefix_before_first_dot>" | base64 -d`
+
+The relay bot appears with its own name and visual styling in Discord, which provides clear visual distinction between orchestrator relay dispatches and direct subagent messages.
+
 ## Discord transport wiring (env config)
-To use the real Discord relay/forward transports, configure:
-- `CLAWSUITE_RELAY_BOT_TOKEN` — relay bot token (a second Discord bot, separate from the main OpenClaw bot)
+Configure via environment variables (typically in a systemd drop-in):
+- `CLAWSUITE_RELAY_BOT_TOKEN` — the **relay bot's** token (not the main OpenClaw bot token)
 - `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
 - `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
 - `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
 - `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
 
-Example:
-```bash
-export CLAWSUITE_RELAY_BOT_TOKEN="..."
-export CLAWSUITE_RELAY_CHANNEL_MAP_JSON='{"systems-eng":"1474868861525557308"}'
-export CLAWSUITE_RELAY_MENTION_MAP_JSON='{"systems-eng":"123456789012345678"}'
-export CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID="1474838614197141729"
-export CLAWSUITE_RELAY_ENABLED="1"
+Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`):
+```ini
+[Service]
+Environment=CLAWSUITE_RELAY_ENABLED=1
+Environment=CLAWSUITE_RELAY_BOT_TOKEN=<relay_bot_token>
+Environment=CLAWSUITE_RELAY_CHANNEL_MAP_JSON="{\"systems-eng\":\"1474868861525557308\"}"
+Environment=CLAWSUITE_RELAY_MENTION_MAP_JSON="{\"systems-eng\":\"794579141801934879\"}"
+Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 ```
 
 ## OpenClaw runtime hook wiring
@@ -86,6 +100,5 @@ The relay bot uses a separate Discord bot token. By default, OpenClaw ignores bo
 The relay bot's user ID can be decoded from its token: `echo -n "<token_prefix_before_first_dot>" | base64 -d`.
 
 ## Known deferred UX items
-- Bot identity: Both dispatches and subagent replies display as the Discord bot name ("openclaw"), not per-agent identity. Would require webhook-based posting or multiple bot tokens.
-- @mention noise: Relay posts @mention the human user for routing, but this is unnecessary when `requireMention: false` is set.
-- Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional for correlation but noisy for casual reading.
+- @mention noise: Relay posts @mention the human user for routing, but this is unnecessary when `requireMention: false` is set. The mention map currently targets the human user, not the OpenClaw bot.
+- Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional for correlation but noisy for casual reading. Could be moved to Discord embed metadata in a future phase.

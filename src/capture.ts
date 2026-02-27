@@ -45,6 +45,9 @@ export async function captureSubagentResponse(
   }
 
   if (!dispatch) return { status: "ignored", reason: "no_dispatch_match" };
+  if (dispatch.postedMessageId && event.messageId === dispatch.postedMessageId) {
+    return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "own_relay_message" };
+  }
   if (!canCaptureFromState(dispatch.state)) {
     return { status: "ignored", dispatchId: dispatch.dispatchId, reason: `state_${dispatch.state}` };
   }

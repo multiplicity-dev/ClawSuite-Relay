@@ -209,8 +209,33 @@ Use this as the canonical chronological log.
 - Risk introduced: Medium (any message from whitelisted bot user ID in any allowed channel will be processed; mitigated by strict `users` allowlist).
 - Rollback note: Remove `allowBots: true` and relay bot user ID from config.
 
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6) + Dave
+- Change: Created separate "ClawSuite-Relay" Discord bot and updated all config to use its token and user ID.
+- Why: OpenClaw's self-message filter unconditionally drops messages from its own bot identity. Using the same bot token for both the gateway and the relay meant relay messages were invisible to subagent sessions. A second bot is architecturally required (as noted in relay-bot-plan.md).
+- Evidence:
+  - Created "ClawSuite-Relay" application in Discord Developer Portal
+  - Invited to server with Send Messages permission (OAuth2 permission 2048)
+  - Updated systemd drop-in with new `CLAWSUITE_RELAY_BOT_TOKEN`
+  - Updated `openclaw.json` with new relay bot user ID (`1476809589591773295`) in `allowFrom` and guild `users`
+  - Verified: relay messages now visible to systems-eng, agent responds to dispatched prompts
+  - Side benefit: relay bot displays with distinct name and yellow highlight in Discord, resolving the bot identity UX issue
+- Risk introduced: Low (additive bot, no changes to main OpenClaw bot).
+- Rollback note: Revert to old bot token in systemd drop-in, remove new user ID from openclaw.json.
+
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Fixed capture logic forwarding relay bot's own outbound prompt instead of subagent reply.
+- Why: With `allowBots: true`, the gateway processes relay bot messages via `message_received`. The relay bot's outbound dispatch prompt contains `[relay_dispatch_id:...]`, which the capture logic matched as a "subagent response" and forwarded back to the orchestrator — echoing the prompt instead of the actual reply.
+- Evidence:
+  - Root cause: `captureSubagentResponse` matched the relay bot's own outbound message via the dispatch marker. The dispatch was in state `POSTED_TO_CHANNEL`, so it passed state gating and forwarded the prompt content.
+  - Fix: Added `event.messageId === dispatch.postedMessageId` guard in `capture.ts`. If the incoming message ID matches the dispatch's posted message ID, it's the relay's own outbound message and is skipped.
+  - Added test: "capture ignores relay bot's own outbound message" in `test/capture.test.ts`.
+  - All 26/26 tests passing.
+- Risk introduced: Low (additive guard, no behavior change for legitimate subagent responses).
+- Rollback note: Remove the `postedMessageId` guard from `captureSubagentResponse`.
+
 - Deferred (explicit from live activation):
-  - Bot identity: Both orchestrator dispatches and subagent replies display as "openclaw" (single bot name). Per-agent display names would require webhook-based posting or multiple bot tokens.
   - @mention noise: Relay posts `@climbswithgoats` for routing/gating, but `requireMention: false` means it's unnecessary. The mention map currently points to the human user, not the OpenClaw bot.
   - Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional but noisy for casual reading.
 

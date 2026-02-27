@@ -104,6 +104,43 @@ test("capture falls back to marker when no message reference", async () => {
   assert.equal(updated?.state, "COMPLETED");
 });
 
+test("capture ignores relay bot's own outbound message", async () => {
+  const dispatchTransport = {
+    async postToChannel() {
+      return { messageId: "posted-self-1" };
+    }
+  };
+
+  const dispatch = await relay_dispatch(
+    { targetAgentId: "systems-eng", task: "self-test", requestId: "capture-self-1" },
+    { transport: dispatchTransport }
+  );
+
+  const forwardTransport = {
+    async forwardToOrchestrator() {
+      return { messageId: "should-not-be-called" };
+    }
+  };
+
+  // Simulate the relay bot's own outbound message being received back via the gateway.
+  // The messageId matches the dispatch's postedMessageId.
+  const result = await captureSubagentResponse(
+    {
+      channelId: "systems-eng-channel",
+      messageId: "posted-self-1",
+      content: `self-test\n\n[relay_dispatch_id:${dispatch.dispatchId}]`
+    },
+    { forwardTransport }
+  );
+
+  assert.equal(result.status, "ignored");
+  assert.equal(result.reason, "own_relay_message");
+
+  // Dispatch should still be in POSTED_TO_CHANNEL, not captured.
+  const unchanged = await loadDispatch(dispatch.dispatchId!);
+  assert.equal(unchanged?.state, "POSTED_TO_CHANNEL");
+});
+
 test("forward failure leaves dispatch in SUBAGENT_RESPONDED for retry", async () => {
   const dispatchTransport = {
     async postToChannel() {

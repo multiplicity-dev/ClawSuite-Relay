@@ -4,18 +4,27 @@
 - Plugin installed as local link and loaded (`clawsuite-relay`).
 - Runtime hook wiring is implemented (`message_received` capture + `message_sending` suppression).
 - `relay_dispatch` tool registered via plugin, visible to agents with `tools.alsoAllow`.
-- Systemd drop-in for relay env vars configured.
+- Separate relay bot created ("ClawSuite-Relay") with distinct Discord identity.
+- Systemd drop-in for relay env vars configured with relay bot token.
+- `allowBots: true` + relay bot user ID in `openclaw.json` allowlists.
 - **Step 1 complete:** gateway restarted, plugin loaded, no transport errors.
 - **Step 2 complete:** plugin confirmed loaded in gateway logs.
-- **Smoke Test A (dispatch post path):** verified — orchestrator calls `relay_dispatch` tool, message posted to #tech with dispatch marker and @mention.
-- **Smoke Tests B–D:** pending.
+- **Smoke Test A (dispatch post path):** verified — orchestrator calls `relay_dispatch` tool, message posted to #tech with dispatch marker. Systems-eng responds.
+- **Smoke Test A bug found and fixed:** capture was forwarding the relay bot's own outbound prompt instead of the subagent's reply. Fixed by checking `event.messageId === dispatch.postedMessageId` in capture logic.
+- **Smoke Tests B–D:** pending re-test after capture fix.
 
 ## Why this runbook exists
 To let either systems-eng or Claude Code finish activation and testing with a clear handoff checklist.
 
 ---
 
-## Prerequisites — Tool visibility (REQUIRED)
+## Prerequisites
+
+### Second Discord bot (REQUIRED)
+
+ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages, so relay messages from the same bot identity are invisible to subagent sessions. See README.md for setup steps.
+
+### Tool visibility (REQUIRED)
 
 Plugin tools are not automatically visible to agents. Each agent that needs to call `relay_dispatch` must have it in its `tools.alsoAllow` in `~/.openclaw/openclaw.json`:
 
@@ -102,8 +111,8 @@ Expected: `clawsuite-relay` loaded, relay and forward transports initialized. Co
 - long-message split strategy
 
 ## Deferred UX issues (observed during live testing)
-- **Bot identity:** Both orchestrator dispatches and subagent replies display as "openclaw" (the Discord bot name). Ideally, dispatches would identify the originating agent (e.g., "CEO"). This is a single-bot-token limitation; addressing it would require Discord webhook-based posting with per-agent display names, or multiple bot tokens.
-- **@mention in relay posts:** The relay posts `@username` for routing/gating purposes, but this is confusing to human readers who see themselves mentioned in a machine-to-machine prompt. Consider suppressing the mention display or moving it to metadata.
+- **Bot identity:** Resolved — the separate relay bot ("ClawSuite-Relay") has its own name and visual styling (yellow highlight in Discord), providing clear distinction from OpenClaw's direct messages.
+- **@mention in relay posts:** The relay posts `@username` for routing/gating purposes, but this is confusing to human readers who see themselves mentioned in a machine-to-machine prompt. The mention map currently targets the human user, not the OpenClaw bot. Consider removing the mention since `requireMention: false` makes it unnecessary.
 - **Visible dispatch markers:** `[relay_dispatch_id:...]` markers appear in channel messages. Functional for correlation but noisy for casual reading. Consider moving to Discord embed metadata or message components in a future phase.
 
 ---
