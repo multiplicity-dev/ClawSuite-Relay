@@ -4,6 +4,9 @@
   "description": "Relay bridge for OpenClaw orchestrator to subagent channels",
   "type": "module",
   "main": "dist/index.js",
+  "openclaw": {
+    "extensions": ["./src/openclaw-plugin.ts"]
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

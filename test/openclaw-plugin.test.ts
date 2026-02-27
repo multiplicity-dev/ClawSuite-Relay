@@ -30,6 +30,41 @@ test("registers message_received and message_sending hooks", () => {
   assert.equal(typeof hooks.message_sending, "function");
 });
 
+test("message_received is no-op for non-discord channel", async () => {
+  const hooks: Record<string, Function> = {};
+  const logger = { info: () => {}, warn: () => {} };
+  register({
+    logger,
+    on: (name, fn) => {
+      hooks[name] = fn;
+    }
+  });
+
+  const result = await hooks.message_received(
+    { content: "ignored", metadata: { channelId: "systems-eng-channel", messageId: "x" } },
+    { channelId: "slack", conversationId: "systems-eng-channel" }
+  );
+
+  assert.equal(result, undefined);
+});
+
+test("message_received bails when content missing", async () => {
+  const hooks: Record<string, Function> = {};
+  register({
+    logger: {},
+    on: (name, fn) => {
+      hooks[name] = fn;
+    }
+  });
+
+  const result = await hooks.message_received(
+    { content: "", metadata: { channelId: "systems-eng-channel", messageId: "x2" } },
+    { channelId: "discord", conversationId: "systems-eng-channel" }
+  );
+
+  assert.equal(result, undefined);
+});
+
 test("message_sending cancels transient announce when correlated dispatch exists", async () => {
   const hooks: Record<string, Function> = {};
   register({

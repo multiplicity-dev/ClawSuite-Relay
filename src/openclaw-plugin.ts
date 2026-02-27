@@ -53,21 +53,25 @@ export default function register(api: PluginApi) {
     const content = asString(event?.content) ?? "";
     if (!channelId || !messageId || !content) return;
 
-    const result = await captureSubagentResponse(
-      {
-        channelId,
-        messageId,
-        content,
-        referencedMessageId: resolveReferencedMessageId(event)
-      },
-      { forwardTransport }
-    );
+    try {
+      const result = await captureSubagentResponse(
+        {
+          channelId,
+          messageId,
+          content,
+          referencedMessageId: resolveReferencedMessageId(event)
+        },
+        { forwardTransport }
+      );
 
-    if (result.status === "processed") {
-      api.logger.info?.(`clawsuite-relay: captured dispatch ${result.dispatchId}`);
-    }
-    if (result.status === "failed") {
-      api.logger.warn?.(`clawsuite-relay: capture failed for dispatch ${result.dispatchId}`);
+      if (result.status === "processed") {
+        api.logger.info?.(`clawsuite-relay: captured dispatch ${result.dispatchId}`);
+      }
+      if (result.status === "failed") {
+        api.logger.warn?.(`clawsuite-relay: capture failed for dispatch ${result.dispatchId}`);
+      }
+    } catch (err) {
+      api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
     }
   });
 

@@ -157,3 +157,18 @@ Use this as the canonical chronological log.
 - Risk introduced: Medium (runtime behavior depends on env/channel config correctness).
 - Rollback note: Disable plugin (`openclaw plugins disable clawsuite-relay`) and restart gateway.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Applied runtime-hook audit follow-ups (entrypoint + resiliency).
+- Why: Ensure plugin loads via documented OpenClaw extension discovery and harden hook error isolation.
+- Evidence:
+  - Added `package.json#openclaw.extensions` pointing to `./src/openclaw-plugin.ts`
+  - Added try/catch boundary around capture execution in `message_received`
+  - Expanded plugin tests for non-discord no-op and missing-content early bail
+- Risk introduced: Low.
+- Rollback note: Revert follow-up commit if loader assumptions change.
+
+- Deferred (explicit from runtime-hook audit):
+  - `relayEnabled`/`orchestratorChannelId` are read at register-time (restart required for config/env changes), accepted for v1 operational model.
+  - Relay-channel allowlist optimization in `message_received` deferred to Milestone 2/3 performance pass.
+
