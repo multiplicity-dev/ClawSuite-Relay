@@ -1,5 +1,5 @@
 import { logRelay } from "./logger.js";
-import { loadDispatch, findDispatchByPostedMessageId, updateDispatch } from "./state.js";
+import { loadDispatch, findDispatchByPostedMessageId, findPendingDispatchForAgent, updateDispatch } from "./state.js";
 import { type ForwardTransport, UnconfiguredForwardTransport } from "./forward.js";
 import { extractRelayDispatchId } from "./markers.js";
 import type { DispatchRecord } from "./types.js";
@@ -83,6 +83,55 @@ export async function captureSubagentResponse(
     return { status: "processed", dispatchId: dispatch.dispatchId };
   } catch (error) {
     logRelay("dispatch.capture_failed", {
+      dispatchId: dispatch.dispatchId,
+      error: String(error)
+    });
+    return { status: "failed", dispatchId: dispatch.dispatchId, reason: "forward_failed" };
+  }
+}
+
+export interface OutboundCaptureEvent {
+  targetAgentId: string;
+  content: string;
+}
+
+export async function captureOutboundResponse(
+  event: OutboundCaptureEvent,
+  deps: CaptureDeps = {}
+): Promise<CaptureResult> {
+  const forwardTransport = deps.forwardTransport ?? new UnconfiguredForwardTransport();
+
+  const dispatch = await findPendingDispatchForAgent(event.targetAgentId);
+  if (!dispatch) return { status: "ignored", reason: "no_pending_dispatch" };
+
+  try {
+    await updateDispatch({
+      ...dispatch,
+      state: "SUBAGENT_RESPONDED"
+    });
+
+    const forwarded = await forwardTransport.forwardToOrchestrator({
+      dispatchId: dispatch.dispatchId,
+      targetAgentId: dispatch.targetAgentId,
+      subagentMessageId: dispatch.postedMessageId ?? "unknown",
+      content: event.content
+    });
+
+    await updateDispatch({
+      ...dispatch,
+      state: "COMPLETED",
+      forwardedMessageId: forwarded.messageId
+    });
+
+    logRelay("dispatch.forwarded_outbound", {
+      dispatchId: dispatch.dispatchId,
+      targetAgentId: dispatch.targetAgentId,
+      forwardedMessageId: forwarded.messageId
+    });
+
+    return { status: "processed", dispatchId: dispatch.dispatchId };
+  } catch (error) {
+    logRelay("dispatch.outbound_capture_failed", {
       dispatchId: dispatch.dispatchId,
       error: String(error)
     });

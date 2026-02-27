@@ -9,8 +9,8 @@ process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
 process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
 
 const { relay_dispatch } = await import("../src/index.js");
-const { captureSubagentResponse, extractDispatchId } = await import("../src/capture.js");
-const { loadDispatch } = await import("../src/state.js");
+const { captureSubagentResponse, captureOutboundResponse, extractDispatchId } = await import("../src/capture.js");
+const { loadDispatch, saveDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -194,4 +194,50 @@ test("forward failure leaves dispatch in SUBAGENT_RESPONDED for retry", async ()
   const finalState = await loadDispatch(dispatch.dispatchId!);
   assert.equal(finalState?.state, "COMPLETED");
   assert.equal(finalState?.forwardedMessageId, "fwd-3");
+});
+
+test("captureOutboundResponse forwards when pending dispatch exists for agent", async () => {
+  // Create dispatch directly to avoid V1 target agent validation and stale dispatch collisions.
+  const dispatchId = "00000000-0000-1000-8000-000000000099";
+  await saveDispatch({
+    dispatchId,
+    targetAgentId: "outbound-test-agent",
+    task: "outbound test",
+    state: "POSTED_TO_CHANNEL",
+    postedMessageId: "posted-outbound-1",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const forwardCalls: Array<{ dispatchId: string; content: string }> = [];
+  const forwardTransport = {
+    async forwardToOrchestrator(req: { dispatchId: string; content: string; subagentMessageId: string; targetAgentId: string }) {
+      forwardCalls.push({ dispatchId: req.dispatchId, content: req.content });
+      return { messageId: "fwd-outbound-1" };
+    }
+  };
+
+  const result = await captureOutboundResponse(
+    { targetAgentId: "outbound-test-agent", content: "thumbs up" },
+    { forwardTransport }
+  );
+
+  assert.equal(result.status, "processed");
+  assert.equal(result.dispatchId, dispatchId);
+  assert.equal(forwardCalls.length, 1);
+  assert.equal(forwardCalls[0].content, "thumbs up");
+
+  const updated = await loadDispatch(dispatchId);
+  assert.equal(updated?.state, "COMPLETED");
+  assert.equal(updated?.forwardedMessageId, "fwd-outbound-1");
+});
+
+test("captureOutboundResponse ignores when no pending dispatch for agent", async () => {
+  const result = await captureOutboundResponse(
+    { targetAgentId: "unknown-agent", content: "no dispatch" },
+    {}
+  );
+
+  assert.equal(result.status, "ignored");
+  assert.equal(result.reason, "no_pending_dispatch");
 });

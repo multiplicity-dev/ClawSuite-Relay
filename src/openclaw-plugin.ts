@@ -1,4 +1,4 @@
-import { captureSubagentResponse } from "./capture.js";
+import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
 import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
@@ -53,10 +53,55 @@ export default function register(api: PluginApi) {
     forwardTransport = undefined;
   }
 
+  // Build reverse channel map for outbound response capture.
+  let reverseChannelMap: Record<string, string> = {};
+  try {
+    const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
+    if (rawChannels) {
+      const channelMap = JSON.parse(rawChannels) as Record<string, string>;
+      for (const [agentId, channelId] of Object.entries(channelMap)) {
+        reverseChannelMap[channelId] = agentId;
+      }
+    }
+  } catch {
+    // channel map parsing handled by transportFromEnv; no-op here
+  }
+
   // Register relay_dispatch as a tool the orchestrator can call.
   api.registerTool(createRelayDispatchTool(relayTransport));
 
-  // Capture subagent replies from Discord inbound messages.
+  // Capture subagent responses from outgoing messages (message_sent).
+  // This is the primary capture path: when OpenClaw posts a subagent's response
+  // in a relay channel, we forward it to the orchestrator.
+  api.on("message_sent", async (event, ctx) => {
+    if (ctx.channelId !== "discord") return;
+    if (!relayEnabled) return;
+    if (event?.success === false) return;
+
+    const targetChannelId = asString(event?.to) ?? asString(ctx?.conversationId);
+    if (!targetChannelId) return;
+
+    const targetAgentId = reverseChannelMap[targetChannelId];
+    if (!targetAgentId) return;
+
+    const content = asString(event?.content);
+    if (!content) return;
+
+    try {
+      const result = await captureOutboundResponse(
+        { targetAgentId, content },
+        { forwardTransport }
+      );
+
+      if (result.status === "processed") {
+        api.logger.info?.(`clawsuite-relay: captured outbound response for dispatch ${result.dispatchId}`);
+      }
+    } catch (err) {
+      api.logger.warn?.(`clawsuite-relay: outbound capture exception (${String(err)})`);
+    }
+  });
+
+  // Capture subagent replies from Discord inbound messages (fallback path).
   api.on("message_received", async (event, ctx) => {
     if (ctx.channelId !== "discord") return;
     if (!relayEnabled) return;

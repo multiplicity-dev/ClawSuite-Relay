@@ -33,6 +33,7 @@ test("registers hooks and relay_dispatch tool", () => {
   register(api);
 
   assert.equal(typeof hooks.message_received, "function");
+  assert.equal(typeof hooks.message_sent, "function");
   assert.equal(typeof hooks.message_sending, "function");
   assert.equal(tools.length, 1);
   assert.equal(tools[0].tool.name, "relay_dispatch");
