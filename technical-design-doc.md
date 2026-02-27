@@ -117,3 +117,12 @@ Persistence:
   - no silent fallback to `sessions_spawn`
   - token is secret-managed and never logged
   - only mapped channels/agents are accepted in v1
+
+## 10. Milestone 0 Approval Checklist (required before first code)
+- [ ] Scope approved: v1 is CTO-only single-subagent relay (no multi-subagent batching)
+- [ ] Contract approved: `relay_dispatch` request/response fields + error codes
+- [ ] Failure policy approved: fail loudly, no silent fallback
+- [ ] Security policy approved: secret-managed token, minimal permissions, sender validation
+- [ ] Observability approved: dispatchId correlation + required lifecycle logs
+- [ ] Rollback approved: `relay.enabled=false` switch + documented restore path
+- [ ] Documentation policy approved: docs and code updated in same commit/PR set

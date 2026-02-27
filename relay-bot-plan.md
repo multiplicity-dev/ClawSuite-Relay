@@ -90,6 +90,7 @@ From the orchestrator's perspective: "I compose prompts, they get posted to chan
   - Clarification: this does **not** guarantee orchestrator has enough context when composing new dispatches across many agents/channels. orchestrator still needs explicit pre-dispatch context gathering (`sessions_history` + STATUS/memory checks) before writing prompts. This is distinct from orchestrator's downstream synthesis context in section 3.8.
 - **(c)** The relay mechanism does not create cascading responses. The relay bot posts the prompt; the subagent responds once; the hook forwards to orchestrator. No loops.
 - **(d)** This is the **default flow** whenever orchestrator delegates. Not an opt-in mode.
+- **(e)** Strategic benefit: reduces forced choice between orchestrator-first and subagent-first interaction styles. If relay works as intended, users can fluidly move between direct subagent interaction (speed/depth) and orchestrator synthesis (integration) without losing transparency or continuity.
 
 ---
 
