@@ -120,3 +120,14 @@ Use this as the canonical chronological log.
   - Marker regex looseness is acceptable due to UUID validation guard in `loadDispatch`; tighten later if noisy.
   - Test env-var concurrency fragility accepted for now; consider `--test-concurrency=1` or injected config factory in hardening phase.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Implemented transient-general-announce suppression filter logic.
+- Why: Close remaining Milestone 1 behavior requirement before runtime hook integration.
+- Evidence:
+  - Added `src/announce-filter.ts` with `shouldSuppressTransientGeneralAnnounce(...)`
+  - Supports suppression by dispatch marker and by related subagent message id correlation
+  - Added `test/announce-filter.test.ts` coverage for disabled mode, marker path, and message-id path
+- Risk introduced: Low (logic is isolated; no runtime interception wired yet).
+- Rollback note: Revert filter commit if suppression strategy changes.
+

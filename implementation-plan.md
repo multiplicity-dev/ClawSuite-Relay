@@ -13,7 +13,7 @@ Status: Draft
 - [x] Subagent response capture core flow (`captureSubagentResponse`) with state transitions
 - [x] Forward to orchestrator path via `ForwardTransport` abstraction (+ Discord adapter)
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
-- [ ] Suppress redundant transient subagent completion announce in #general when relay mode is active
+- [~] Suppress redundant transient subagent completion announce in #general when relay mode is active (filter logic implemented; hook/runtime integration pending)
 
 Acceptance:
 - [ ] End-to-end flow passes in staging
