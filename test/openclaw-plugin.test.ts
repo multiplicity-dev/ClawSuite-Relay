@@ -9,9 +9,11 @@ process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
 process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
 process.env.CLAWSUITE_RELAY_ENABLED = "1";
 process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID = "1474868861525557308";
+process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999999"}';
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
+const { saveDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -33,7 +35,6 @@ test("registers hooks and relay_dispatch tool", () => {
   register(api);
 
   assert.equal(typeof hooks.message_received, "function");
-  assert.equal(typeof hooks.message_sent, "function");
   assert.equal(typeof hooks.message_sending, "function");
   assert.equal(tools.length, 1);
   assert.equal(tools[0].tool.name, "relay_dispatch");
@@ -95,6 +96,37 @@ test("message_sending cancels transient announce when correlated dispatch exists
   );
 
   assert.deepEqual(result, { cancel: true });
+});
+
+test("message_sending attempts outbound capture for subagent channel", async () => {
+  // Create a pending dispatch targeting systems-eng.
+  const dispatchId = "00000000-0000-1000-8000-000000000077";
+  await saveDispatch({
+    dispatchId,
+    targetAgentId: "systems-eng",
+    task: "outbound capture via plugin",
+    state: "POSTED_TO_CHANNEL",
+    postedMessageId: "posted-plugin-outbound-1",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const { api, hooks } = createMockApi();
+  register(api);
+
+  // Simulate systems-eng sending a response to its channel (9999999999999999999).
+  // Forward transport is unconfigured so capture will fail silently, but the
+  // handler must not crash or cancel the message.
+  const result = await hooks.message_sending(
+    {
+      content: "here is my analysis",
+      metadata: { channelId: "9999999999999999999" }
+    },
+    { channelId: "discord", conversationId: "9999999999999999999" }
+  );
+
+  // Should NOT cancel — subagent response posts normally even if forward fails.
+  assert.equal(result, undefined);
 });
 
 test("relay_dispatch tool executes dispatch with mock transport", async () => {

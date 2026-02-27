@@ -19,7 +19,7 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 live activation in progress (dispatch path verified, capture/forward/suppression live tests pending).
+Current implementation status: Milestone 1 — dispatch path verified, return path (capture/forward) BLOCKED. See `live-activation-runbook.md` for details.
 
 ## Prerequisite: Create a second Discord bot
 
@@ -54,9 +54,11 @@ Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 
 ## OpenClaw runtime hook wiring
 This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.json`) that wires:
-- `message_received` → subagent response capture + forward flow
-- `message_sending` → transient orchestrator announce suppression predicate
+- `message_received` → subagent response capture (for messages from external bots)
+- `message_sending` → outbound capture (for agent responses to subagent channels) + announce suppression
 - `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
+
+**Note:** The `message_sending` hook may not fire for embedded agent responses (see `live-activation-runbook.md`). This is the current blocking issue for the return path.
 
 Typical local load path:
 ```bash

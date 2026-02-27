@@ -70,38 +70,9 @@ export default function register(api: PluginApi) {
   // Register relay_dispatch as a tool the orchestrator can call.
   api.registerTool(createRelayDispatchTool(relayTransport));
 
-  // Capture subagent responses from outgoing messages (message_sent).
-  // This is the primary capture path: when OpenClaw posts a subagent's response
-  // in a relay channel, we forward it to the orchestrator.
-  api.on("message_sent", async (event, ctx) => {
-    if (ctx.channelId !== "discord") return;
-    if (!relayEnabled) return;
-    if (event?.success === false) return;
+  api.logger.info?.(`clawsuite-relay: reverse channel map: ${JSON.stringify(reverseChannelMap)}`);
 
-    const targetChannelId = asString(event?.to) ?? asString(ctx?.conversationId);
-    if (!targetChannelId) return;
-
-    const targetAgentId = reverseChannelMap[targetChannelId];
-    if (!targetAgentId) return;
-
-    const content = asString(event?.content);
-    if (!content) return;
-
-    try {
-      const result = await captureOutboundResponse(
-        { targetAgentId, content },
-        { forwardTransport }
-      );
-
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: captured outbound response for dispatch ${result.dispatchId}`);
-      }
-    } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: outbound capture exception (${String(err)})`);
-    }
-  });
-
-  // Capture subagent replies from Discord inbound messages (fallback path).
+  // Capture subagent replies from Discord inbound messages (fallback path for external bots).
   api.on("message_received", async (event, ctx) => {
     if (ctx.channelId !== "discord") return;
     if (!relayEnabled) return;
@@ -133,7 +104,7 @@ export default function register(api: PluginApi) {
     }
   });
 
-  // Suppress transient redundant announces in orchestrator channel when relay mode is active.
+  // Outbound capture + announce suppression (single modifying hook).
   api.on("message_sending", async (event, ctx) => {
     if (ctx.channelId !== "discord") return;
 
@@ -141,6 +112,30 @@ export default function register(api: PluginApi) {
     const content = asString(event?.content) ?? "";
     if (!channelId || !content) return;
 
+    // Outbound capture: if this message is going to a subagent channel with
+    // a pending dispatch, capture the response and forward to orchestrator.
+    // We do NOT cancel — the subagent's message still posts normally.
+    if (relayEnabled) {
+      const targetAgentId = reverseChannelMap[channelId];
+      if (targetAgentId) {
+        try {
+          const result = await captureOutboundResponse(
+            { targetAgentId, content },
+            { forwardTransport }
+          );
+          if (result.status === "processed") {
+            api.logger.info?.(`clawsuite-relay: outbound capture forwarded dispatch ${result.dispatchId}`);
+          }
+          if (result.status === "failed") {
+            api.logger.warn?.(`clawsuite-relay: outbound capture failed for dispatch ${result.dispatchId}`);
+          }
+        } catch (err) {
+          api.logger.warn?.(`clawsuite-relay: outbound capture error (${String(err)})`);
+        }
+      }
+    }
+
+    // Suppress transient redundant announces in orchestrator channel.
     const suppress = await shouldSuppressTransientGeneralAnnounce(
       {
         channelId,

@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Milestone 1 — Live Activation In Progress
+Status: Milestone 1 — BLOCKED on return path (see live-activation-runbook.md)
 
 ## Milestone 0 — Design Freeze
 - [x] Approve TDD
@@ -15,6 +15,7 @@ Status: Milestone 1 — Live Activation In Progress
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
 - [x] `relay_dispatch` tool registered via OpenClaw plugin API (TypeBox schema, execute handler)
 - [~] Suppress redundant transient subagent completion announce in #general when relay mode is active (filter + plugin hook wiring implemented; live suppression test pending)
+- [~] Outbound capture via `message_sending` hook (code complete+tested, but `message_sending` may not fire for embedded agent responses — see live-activation-runbook.md)
 
 Deployment prerequisites (discovered during activation):
 - [x] Plugin tools require `tools.alsoAllow: ["relay_dispatch"]` in per-agent config (`openclaw.json`)

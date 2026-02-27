@@ -235,6 +235,46 @@ Use this as the canonical chronological log.
 - Risk introduced: Low (additive guard, no behavior change for legitimate subagent responses).
 - Rollback note: Remove the `postedMessageId` guard from `captureSubagentResponse`.
 
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Removed `message_sent` hook registration (hook runner corruption) and moved outbound capture to `message_sending`.
+- Why: Registering `api.on("message_sent", ...)` caused the OpenClaw plugin hook runner to stop dispatching ALL modifying hooks (`message_sending`). Only void hooks (`message_received`) continued to fire. Removing `message_sent` and consolidating capture into `message_sending` restores expected behavior.
+- Evidence:
+  - Before `message_sent` registration: `[hooks] running message_sending (1 handlers, sequential)` appeared in logs at 04:09:55, 04:31:51, 05:25:14.
+  - After `message_sent` registration: zero `message_sending` entries. Only `message_received` fired (4 instances observed).
+  - After removing `message_sent`: hook runner logs show `message_received` firing normally. `message_sending` behavior still under investigation (see next entry).
+  - `message_sending` handler now has two paths: (1) outbound capture via `reverseChannelMap` → `captureOutboundResponse`, (2) announce suppression via `shouldSuppressTransientGeneralAnnounce`.
+  - Added `captureOutboundResponse` to `capture.ts` and `findPendingDispatchForAgent` to `state.ts`.
+  - Added test: "message_sending attempts outbound capture for subagent channel" in plugin tests.
+  - All 29/29 tests passing.
+- Risk introduced: Low (removed broken hook, consolidated capture into working hook).
+- Rollback note: Revert `openclaw-plugin.ts` and `capture.ts` changes.
+
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Identified root cause of return-path failure — `message_sending` never fires for systems-eng outbound responses.
+- Why: After fixing all capture/forward logic and removing the `message_sent` corruption, the return path still doesn't work. Detailed log analysis revealed that `message_sending` simply does not fire for embedded agent run completions (systems-eng's Discord responses).
+- Evidence (full timeline from 06:27 dispatch):
+  ```
+  06:27:42.058  dispatch.created (relay_dispatch tool call)
+  06:27:42.437  dispatch.posted (relay bot posts to #tech, messageId=1476828121293652080)
+  06:27:42.595  [hooks] running message_received (relay bot's own message seen by gateway)
+  06:27:43.470  lane enqueue: session:agent:systems-eng:discord:channel:1474868861525557308
+  06:27:43.490  embedded run start: provider=openai-codex model=gpt-5.3-codex
+  06:27:43.497  plugin auto-loaded for systems-eng session
+  06:27:50.552  embedded run agent end (isError=false, 7s duration)
+  06:27:50.569  lane task done — ZERO message_sending events, ZERO Discord API activity
+  ```
+  - systems-eng received the relay message, processed it for 7 seconds, completed without error, but produced NO outbound Discord message.
+  - No `message_sending` hook fired. No announce triggered. Response was silently consumed.
+  - In earlier tests (around 05:25), systems-eng DID respond visibly in #tech. Behavior may be inconsistent or dependent on session state.
+- Blocking question: **Why does systems-eng's embedded agent run complete without producing a Discord message?** Possible causes:
+  1. The agent produced an empty response (GPT-5.3 decided not to reply)
+  2. The gateway's response delivery mechanism doesn't fire `message_sending` for embedded agent responses (it may be an internal-only hook)
+  3. Some session or plugin configuration suppresses response delivery
+  4. The response was delivered via a different path that bypasses the hook pipeline
+- Status: **Blocking — Milestone 1 capture/forward path cannot work until this is resolved.**
+
 - Deferred (explicit from live activation):
   - @mention noise: Relay posts `@climbswithgoats` for routing/gating, but `requireMention: false` means it's unnecessary. The mention map currently points to the human user, not the OpenClaw bot.
   - Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional but noisy for casual reading.
