@@ -1,22 +1,39 @@
 # ClawSuite-Relay Live Activation Runbook
 
-## Current status (2026-02-27, 12:45 CET)
+## Current status (2026-02-27, 15:30 CET)
 
-**Relay loop: functionally working, two known issues remain.**
+**Relay loop: functionally working. Phase 1 NOT complete — blockers listed below.**
 
-Round trip confirmed at `a9606d9`: orchestrator dispatches → relay bot posts to #tech → CTO responds → response captured and forwarded back to orchestrator.
+Round trip confirmed at `a09c21e` (branch `top-down-cleanup`): orchestrator dispatches → relay bot posts to #tech → CTO responds → response captured and forwarded back to orchestrator. CEO confirmed tool outputs (hostname) visible in relay forward.
+
+---
+
+## PHASE 1 BLOCKERS (must resolve before milestone closure)
+
+**Blocker 1 — Forward payloads >2000 chars fail.**
+`extractCurrentTurnContent` captures full turn content (tool results + assistant text), but any response with substantive tool output exceeds Discord's 2000-char message limit. Forward transport rejects with "Forward payload too long for Discord". Needs message splitting in `DiscordForwardTransport.forwardToOrchestrator`. Without this, only trivial responses are forwarded successfully.
+
+**Blocker 2 — Relay envelope visible in orchestrator channel.**
+The relay bot's forwarded message is visible to the human in #general. This is not just cosmetic — it's operational noise. Auto-delete was attempted by GPT but deleted the wrong message (CEO's prompt to #tech instead of the envelope), which cascaded into losing the loop. Approach: auto-delete of the relay bot's OWN forwarded message in the orchestrator channel (not any other message). Must be careful with target selection.
+
+**Blocker 3 — Test C (suppression path) NOT VERIFIED.**
+During correlated transient announce in orchestrator channel, confirm suppression cancels redundant announce. Code exists (`shouldSuppressTransientGeneralAnnounce`) but never tested live.
+
+**Blocker 4 — Test D (fail-loud path) NOT VERIFIED.**
+Temporarily misconfigure forward channel id and confirm failure is explicit (not silent) and recoverable. Code exists (`UnconfiguredForwardTransport` throws) but never tested live.
+
+**Blocker 5 — test-validation-plan.md minimum v1 tests mostly unchecked.**
+Unit tests pass (30/30) but the live validation matrix in `test-validation-plan.md` has not been systematically executed.
+
+---
+
+## Resolved issues
 
 **Issue 1 — RESOLVED: duplicate forward.**
 Two hooks (`before_message_write` and `agent_end`) both fired for the same response within 121ms. Fix: use only one capture hook. Tested with `agent_end` removed — single forward confirmed (dispatchId `537a94a5`).
 
-**Issue 2 — PARTIALLY RESOLVED: assistant text capture.**
-`agent_end` with `extractCurrentTurnContent` captures tool results + assistant text from current turn. CEO confirmed tool outputs (hostname) visible in relay forward. Remaining issues:
-- Forward payloads >2000 chars hit Discord limit (needs message splitting)
-- Content scope: captures tool results + all assistant messages including channel response. Whether to omit channel response TBD.
-- `extractLastAssistantText` tested and confirmed insufficient — returns only channel-visible text.
-
-**Issue 3 — relay envelope visible in orchestrator channel (cosmetic, deferred).**
-The relay bot's forwarded message is visible to the human in #general. Auto-delete was considered but correlated with the start of GPT's failure cascade — approach avoided for now.
+**Issue 2 — RESOLVED: assistant text capture mechanism.**
+`agent_end` with `extractCurrentTurnContent` captures tool results (`role: "toolResult"`) + all assistant messages from current turn. `extractLastAssistantText` tested and confirmed insufficient — returns only channel-visible text. Content scope (whether to omit channel response from forward) TBD but mechanism works.
 
 ### Key architectural findings from troubleshooting
 
