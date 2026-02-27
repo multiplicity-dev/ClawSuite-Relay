@@ -17,7 +17,7 @@ Status: Milestone 1 — IN PROGRESS (blockers remain, see below)
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
 - [x] `relay_dispatch` tool registered via OpenClaw plugin API (TypeBox schema, execute handler)
 - [x] Disk-persisted arming at dispatch time (plugin is re-initialized per session — in-memory state lost)
-- [x] `agent_end` hook captures full current-turn content (`extractCurrentTurnContent`)
+- [ ] **`agent_end` hook captures full assistant text — NOT WORKING RELIABLY.** `extractCurrentTurnContent` exists and captured tool results in one simple test (CEO confirmed hostname visible), but in real-world tests the orchestrator still only receives channel-visible text, not the full assistant-layer content. This is the PRIMARY Phase 1 blocker. See dev-log.md "Handoff state" for details on what was tried and what failed.
 
 ### Deployment prerequisites (done)
 - [x] Plugin tools require `tools.alsoAllow: ["relay_dispatch"]` in per-agent config (`openclaw.json`)
@@ -25,18 +25,20 @@ Status: Milestone 1 — IN PROGRESS (blockers remain, see below)
 - [x] Separate Discord bot ("ClawSuite-Relay") — OpenClaw drops its own bot's messages
 
 ### Remaining work (Phase 1 blockers)
-- [ ] **Forward payloads >2000 chars** — `extractCurrentTurnContent` captures full turn content but any substantive tool output exceeds Discord's 2000-char limit. Needs message splitting in `DiscordForwardTransport.forwardToOrchestrator`.
+- [ ] **PRIMARY BLOCKER: Orchestrator receives only channel-visible text, not full assistant text.** `extractCurrentTurnContent` captures tool results + assistant messages from the current turn in the `agent_end` messages array. It worked once for a trivial test (hostname visible to CEO). But in real-world tests with complex prompts, the orchestrator still only sees what the CTO posted to the Discord channel — not the underlying tool outputs, reasoning, or full assistant-layer content. This was the capability GPT reportedly achieved (with echo issues) but is not reliably working in the current code. The mechanism (`agent_end` + turn scoping + `toolResult` role + array content handling) is in place but the end-to-end result does not consistently deliver assistant text to the orchestrator. **This is why the handoff is happening.**
 - [ ] **Relay envelope visibility** — relay bot's forwarded message visible to human in #general. Needs auto-delete of relay bot's OWN forwarded message (not other messages). GPT's prior attempt deleted the wrong message (CEO's prompt to #tech) and cascaded into losing the loop.
 - [ ] **Suppress redundant transient announce** — code exists (`shouldSuppressTransientGeneralAnnounce`) but NEVER tested live (Test C in runbook).
 - [ ] **Fail-loud path** — code exists (`UnconfiguredForwardTransport` throws) but NEVER tested live (Test D in runbook).
 - [ ] **Live validation matrix** — `test-validation-plan.md` minimum v1 tests mostly unchecked.
 
+### Deferred to post-Phase 1
+- Forward payloads >2000 chars — needs message splitting in `DiscordForwardTransport`. Not blocking Phase 1 completion.
+
 ### Acceptance
 - [x] Dispatch post path verified (orchestrator → #tech, marker present)
-- [x] Capture + forward path verified (subagent reply → orchestrator channel, tool outputs included)
+- [ ] **Capture + forward delivers ASSISTANT TEXT to orchestrator** — NOT WORKING RELIABLY. Tool results appeared in one simple test but complex responses still only show channel text. This is the primary acceptance gap.
 - [ ] Suppression path verified (redundant announce cancelled) — NOT TESTED LIVE
 - [ ] Fail-loud path verified (misconfigured transport → explicit failure) — NOT TESTED LIVE
-- [ ] Forward works for substantive responses (>2000 chars) — BLOCKED on message splitting
 - [ ] Relay envelope not visible to human in orchestrator channel — BLOCKED on auto-delete
 
 ## Milestone 2 — Reliability & Fail Loudly
