@@ -1,0 +1,10 @@
+{
+  "id": "clawsuite-relay",
+  "name": "ClawSuite Relay",
+  "description": "Relay orchestration hooks for dispatch, capture/forward, and transient announce suppression.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

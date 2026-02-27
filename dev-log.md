@@ -143,3 +143,17 @@ Use this as the canonical chronological log.
 - Risk introduced: Low (predicate behavior made stricter, with added tests).
 - Rollback note: Revert this commit if suppression-state policy changes.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Wired suppression/capture predicate into OpenClaw runtime hook path (plugin entrypoint).
+- Why: Move from pure library logic to executable hook integration for `message_received` + `message_sending`.
+- Evidence:
+  - Added `src/openclaw-plugin.ts` registering hooks:
+    - `message_received` -> `captureSubagentResponse`
+    - `message_sending` -> `shouldSuppressTransientGeneralAnnounce` with `{ cancel: true }`
+  - Added plugin packaging files: `openclaw.plugin.json`, root `index.ts`
+  - Added plugin integration tests in `test/openclaw-plugin.test.ts`
+  - README updated with plugin install/load instructions
+- Risk introduced: Medium (runtime behavior depends on env/channel config correctness).
+- Rollback note: Disable plugin (`openclaw plugins disable clawsuite-relay`) and restart gateway.
+
