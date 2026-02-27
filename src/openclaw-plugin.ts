@@ -75,6 +75,29 @@ function previewEventShape(event: any): string {
   return JSON.stringify(obj);
 }
 
+function extractAssistantTextFromAgentMessage(message: any): string {
+  const direct = asString(message?.content) ?? asString(message?.text);
+  if (direct) return direct;
+
+  if (Array.isArray(message?.content)) {
+    const joined = message.content
+      .map((part: any) => asString(part?.text) ?? asString(part?.content) ?? asString(part))
+      .filter(Boolean)
+      .join("\n");
+    if (joined.trim()) return joined;
+  }
+
+  if (Array.isArray(message?.parts)) {
+    const joined = message.parts
+      .map((part: any) => asString(part?.text) ?? asString(part?.content))
+      .filter(Boolean)
+      .join("\n");
+    if (joined.trim()) return joined;
+  }
+
+  return "";
+}
+
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
@@ -96,12 +119,13 @@ export default function register(api: PluginApi) {
     forwardTransport = undefined;
   }
 
-  // Build reverse channel map for outbound response capture.
+  // Build channel maps for outbound response capture.
+  let channelMap: Record<string, string> = {};
   let reverseChannelMap: Record<string, string> = {};
   try {
     const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
     if (rawChannels) {
-      const channelMap = JSON.parse(rawChannels) as Record<string, string>;
+      channelMap = JSON.parse(rawChannels) as Record<string, string>;
       for (const [agentId, channelId] of Object.entries(channelMap)) {
         reverseChannelMap[channelId] = agentId;
       }
@@ -148,6 +172,36 @@ export default function register(api: PluginApi) {
       }
     } catch (err) {
       api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
+    }
+  });
+
+  // Capture assistant text before write as a reliable fallback when outbound hooks vary.
+  api.on("before_message_write", async (event, ctx) => {
+    if (!relayEnabled) return;
+
+    const targetAgentId = asString(ctx?.agentId);
+    if (!targetAgentId) return;
+    if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
+
+    const role = asString(event?.message?.role);
+    if (role && role !== "assistant") return;
+
+    const content = extractAssistantTextFromAgentMessage(event?.message);
+    if (!content) return;
+
+    try {
+      const result = await captureOutboundResponse(
+        { targetAgentId, content },
+        { forwardTransport }
+      );
+      if (result.status === "processed") {
+        api.logger.info?.(`clawsuite-relay: before_message_write captured dispatch ${result.dispatchId}`);
+      }
+      if (result.status === "failed") {
+        api.logger.warn?.(`clawsuite-relay: before_message_write capture failed for dispatch ${result.dispatchId}`);
+      }
+    } catch (err) {
+      api.logger.warn?.(`clawsuite-relay: before_message_write capture error (${String(err)})`);
     }
   });
 

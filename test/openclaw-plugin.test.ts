@@ -36,6 +36,7 @@ test("registers hooks and relay_dispatch tool", () => {
 
   assert.equal(typeof hooks.message_received, "function");
   assert.equal(typeof hooks.message_sending, "function");
+  assert.equal(typeof hooks.before_message_write, "function");
   assert.equal(tools.length, 1);
   assert.equal(tools[0].tool.name, "relay_dispatch");
   assert.equal(typeof tools[0].tool.execute, "function");
@@ -98,7 +99,7 @@ test("message_sending cancels transient announce when correlated dispatch exists
   assert.deepEqual(result, { cancel: true });
 });
 
-test("message_sending attempts outbound capture for subagent channel", async () => {
+test("before_message_write attempts outbound capture for mapped subagent", async () => {
   // Create a pending dispatch targeting systems-eng.
   const dispatchId = "00000000-0000-1000-8000-000000000077";
   await saveDispatch({
@@ -114,18 +115,19 @@ test("message_sending attempts outbound capture for subagent channel", async () 
   const { api, hooks } = createMockApi();
   register(api);
 
-  // Simulate systems-eng sending a response to its channel (9999999999999999999).
-  // Forward transport is unconfigured so capture will fail silently, but the
-  // handler must not crash or cancel the message.
-  const result = await hooks.message_sending(
+  // Simulate assistant message write in systems-eng session.
+  const result = await hooks.before_message_write(
     {
-      content: "here is my analysis",
-      metadata: { channelId: "9999999999999999999" }
+      message: {
+        role: "assistant",
+        content: "here is my analysis"
+      },
+      agentId: "systems-eng"
     },
-    { channelId: "discord", conversationId: "9999999999999999999" }
+    { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
 
-  // Should NOT cancel — subagent response posts normally even if forward fails.
+  // Hook is observational; it should not block/modify write.
   assert.equal(result, undefined);
 });
 

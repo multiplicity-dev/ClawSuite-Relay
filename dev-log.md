@@ -184,6 +184,17 @@ Use this as the canonical chronological log.
 - Rollback note: remove debug env flag or revert commit after investigation.
 
 - Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Switched primary outbound capture trigger to `before_message_write` hook (kept `message_sending` for suppression).
+- Why: Live trace showed dispatch post events but no `message_sending` capture events for assistant replies; `before_message_write` provides reliable assistant-text interception in agent pipeline.
+- Evidence:
+  - Added `before_message_write` hook path in `src/openclaw-plugin.ts` gated by mapped subagent `agentId`
+  - Added assistant message text extraction for `before_message_write` events
+  - Updated plugin tests to verify hook registration and non-blocking before-write capture path
+- Risk introduced: Medium (depends on agentId mapping correctness in runtime ctx).
+- Rollback note: revert this commit and resume `message_sending`-only outbound strategy.
+
+- Date/Time: 2026-02-27
 - Author: Claude Code (Opus 4.6)
 - Change: Created `relay_dispatch` tool for OpenClaw plugin API and wired tool registration.
 - Why: Orchestrator agent cannot call `relay_dispatch` without a registered tool — the function existed but was not exposed via the plugin tool system.
