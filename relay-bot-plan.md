@@ -2,7 +2,7 @@
 
 **Created:** 2026-02-26  
 **Owner:** President (design), CTO (implementation)  
-**Status:** Design complete, ready for technical specification  
+**Status:** Milestone 1 implementation IN PROGRESS — core relay loop works, blockers remain (see implementation-plan.md)
 **Source conversation:** orchestrator #general session, Feb 26 2026 (afternoon/evening)  
 **Reference docs:**
 - `/home/dave/Documents/Notes/ceo/multi-agent-research.md` — research on multi-agent patterns, context gathering, community approaches
@@ -281,12 +281,12 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 - `before_tool_call` hook blocking `sessions_spawn` for channel-bound agents, with redirect to relay tool in error message (see section 7, orchestrator dispatch flow)
 
 **Validation criteria:**
-- [ ] orchestrator composes prompt → appears in subagent channel (via relay bot)
-- [ ] subagent responds in channel → orchestrator receives response (via hook)
-- [ ] subagent remembers the work in subsequent direct conversations
-- [ ] President can see both prompt and response in subagent channel
-- [ ] No loops or cascading responses
-- [ ] Multi-subagent dispatch works (orchestrator sends to 2+ subagents, receives all responses, synthesizes)
+- [x] orchestrator composes prompt → appears in subagent channel (via relay bot) — **VERIFIED LIVE**
+- [x] subagent responds in channel → orchestrator receives response (via hook) — **VERIFIED LIVE** (tool results + assistant text via `agent_end`). Caveat: >2000 char payloads fail.
+- [ ] subagent remembers the work in subsequent direct conversations — **NOT TESTED**
+- [x] President can see both prompt and response in subagent channel — **VERIFIED LIVE**
+- [x] No loops or cascading responses — **VERIFIED LIVE** (echo prevention via relay bot user ID filter + envelope guards)
+- [ ] Multi-subagent dispatch works (orchestrator sends to 2+ subagents, receives all responses, synthesizes) — **OUT OF SCOPE for v1** (Milestone 4)
 
 ### Track B: Plugin Package (Follow-Up)
 
@@ -330,14 +330,14 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 
 These need answers during Track A implementation:
 
-- [ ] **orchestrator→relay bot communication mechanism.** How does orchestrator tell the relay bot "post this message to #it mentioning CTO"? Options: (a) orchestrator calls a custom tool registered by the plugin, (b) orchestrator writes to a file/queue the relay bot watches, (c) orchestrator calls the Discord API directly via exec. Option (a) is cleanest if the plugin can register a tool.
+- [x] **orchestrator→relay bot communication mechanism.** ~~How does orchestrator tell the relay bot "post this message to #it mentioning CTO"?~~ **RESOLVED: Option (a).** Plugin registers `relay_dispatch` tool via `api.registerTool()`. Orchestrator calls it directly. Requires `tools.alsoAllow: ["relay_dispatch"]` in per-agent config.
 - [ ] **Correlation for parallel dispatches.** Preferred: scripted batching in the plugin (correlation ID per dispatch, plugin tracks expected vs received, triggers orchestrator when batch complete). Design questions: where to store batch state (in-memory map vs file)? How does orchestrator declare batch size at dispatch time? How to handle timeouts (one subagent never responds)?
 - [ ] **Failure handling when relay bot is down.** Preferred approach: fail loudly and notify the president rather than silently falling back to `sessions_spawn`. Silent fallback reintroduces the transparency and amnesia problems the relay bot exists to solve, without the president knowing the system has degraded. The preference is to be notified of failures so they can be fixed, not to silently drive on a spare tire. Design question for Track A: what does "fail loudly" look like? (Plugin logs an error + orchestrator tells the president the relay is down? Discord webhook to a monitoring channel?)
-- [ ] **Channel mapping configuration.** Hardcoded agent→channel map? Or derived from OpenClaw config? (agent-to-channel bindings may already exist in `openclaw.json`)
+- [x] **Channel mapping configuration.** **RESOLVED:** JSON env var `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` (e.g., `{"systems-eng":"1474868861525557308"}`). Set via systemd drop-in.
 - [ ] **Response batching for long messages.** If subagent response is split across multiple Discord messages, should the hook buffer and combine? Or pass each part individually?
 - [x] **orchestrator's dispatch flow change (resolved — Track A prerequisite).** Today orchestrator calls `sessions_spawn`. With relay bot, orchestrator needs to: (1) compose prompt, (2) call relay bot tool/API, (3) NOT call `sessions_spawn`. A `before_tool_call` hook blocking `sessions_spawn` for channel-bound agents is **non-optional** — without it, orchestrator will drift back to the familiar tool. Critically, the hook's error message must **redirect orchestrator to the correct procedure** (e.g., "Use the relay_dispatch tool instead of sessions_spawn for channel-bound agents. See [reference doc]."), not just block. An LLM that hits a blocked tool without guidance on the alternative will often report failure or attempt a creative workaround (e.g., trying to call the Discord API directly via exec) rather than consulting its reference docs for the correct approach. The hook block + redirect is a Track A prerequisite.
 - [ ] **Relay bot identity in channel.** The relay bot's Discord username should clearly identify it as a orchestrator relay — e.g., "orchestrator-Relay" — not the president's handle (which would be confusing) and not simply "orchestrator" (which could be mistaken for the orchestrator agent speaking directly in the subagent's channel). Messages may optionally carry a prefix (e.g., "From orchestrator:") for additional clarity. The subagent's soul.md should document the relay architecture so the subagent understands that messages from this bot represent orchestrator-dispatched prompts. Resolution direction: name the bot "orchestrator-Relay" (or similar), document in subagent soul.md, decide on message prefix during Track A.
-- [ ] **Which agents get relay bot routing?** Start with CTO-only in v1, then expand in an explicit rollout plan (CLO next, then broader subagent set after validation).
+- [x] **Which agents get relay bot routing?** **RESOLVED for v1:** CTO-only (`V1_TARGET_AGENT = "systems-eng"`). Expansion deferred to Milestone 4.
 - [ ] **What the subagent sees as the sender identity.** The subagent's session will show the relay bot as the message author (not the president, not orchestrator). The subagent needs to understand that relay bot messages = orchestrator-dispatched prompts and should be treated with the same weight as a direct question from the president. This requires: (a) relay bot named clearly (e.g., "orchestrator-Relay"), (b) subagent SOUL.md updated to document the relay architecture, (c) potentially a brief header in relay messages ("orchestrator asks:" or similar) so the subagent can distinguish relay prompts from any other relay bot usage in the future. Without this, the subagent may treat relay bot messages differently from president messages — e.g., giving less thorough responses or deprioritizing them.
 - [ ] **How orchestrator triggers the relay vs today's `sessions_spawn`.** Today orchestrator has muscle memory for `sessions_spawn`. The `before_tool_call` hook blocking `sessions_spawn` (see above) handles prevention, but orchestrator also needs a **positive path**: a new tool or procedure that is as easy to invoke as `sessions_spawn` was. If the replacement is harder to use, orchestrator will waste tokens trying workarounds. The custom tool registered by the plugin (option (a) in the orchestrator→relay bot question above) should mirror `sessions_spawn`'s interface as closely as possible: `relay_dispatch(agentId, task, correlationId?)`.
 - [ ] **Timeout handling for subagent non-response.** If orchestrator dispatches to CTO and CTO never responds (crashed, busy, stuck), the batch never completes and orchestrator never synthesizes. The plugin needs a configurable timeout per dispatch (e.g., 10 minutes). On timeout: notify orchestrator that subagent X did not respond within the window. orchestrator can then decide whether to retry, fall back to `sessions_spawn`, or report the gap to the president.

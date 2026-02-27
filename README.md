@@ -19,7 +19,7 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 — dispatch path verified, return path (capture/forward) BLOCKED. See `live-activation-runbook.md` for details.
+Current implementation status: Milestone 1 IN PROGRESS — relay loop works (dispatch + capture + forward), but blockers remain: >2000 char payload splitting, relay envelope visibility, live suppression/fail-loud tests. See `implementation-plan.md` for full status.
 
 ## Prerequisite: Create a second Discord bot
 
@@ -54,11 +54,17 @@ Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 
 ## OpenClaw runtime hook wiring
 This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.json`) that wires:
-- `message_received` → subagent response capture (for messages from external bots)
-- `message_sending` → outbound capture (for agent responses to subagent channels) + announce suppression
+- `message_received` → subagent response capture (fallback path for external bot messages)
+- `message_sending` → outbound capture for subagent channels + announce suppression in orchestrator channel
+- `agent_end` → **primary capture path**: extracts full current-turn content (tool results + assistant text) from the agent's session messages array
 - `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
 
-**Note:** The `message_sending` hook may not fire for embedded agent responses (see `live-activation-runbook.md`). This is the current blocking issue for the return path.
+**Key findings from live testing:**
+- `message_sending` does NOT fire for embedded agent responses.
+- `before_message_write` only captures Discord-visible text (truncated), not full response.
+- `agent_end` provides the full session history — extraction must scope to current turn only.
+- OpenClaw uses `role: "toolResult"` (not `"tool"`) and message content can be arrays (not just strings).
+- Plugin is re-initialized per agent session — in-memory state does not survive. Arming uses disk persistence.
 
 Typical local load path:
 ```bash

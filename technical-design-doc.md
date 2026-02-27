@@ -1,6 +1,6 @@
 # Technical Design Doc (TDD) — Relay Bot Initiative
 
-Status: Draft (Milestone 0 fill-in complete; pending approval)
+Status: Milestone 1 IN PROGRESS — core relay loop works, blockers remain (see implementation-plan.md)
 
 ## 1. Scope
 - In-scope (v1):
@@ -104,19 +104,22 @@ Persistence:
 - **Rule:** implementation is not "done" until code + docs + rollback notes are all updated.
 - **Version control policy:** all design/ops docs in this initiative are committed to git along with code changes (same milestone PR/commit set), so rollback can be performed from repository state.
 ## 9. Acceptance Criteria
+
+### Implementation status (2026-02-27)
+
 - functional:
-  - orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot
-  - subagent response is captured and forwarded back to orchestrator with dispatchId
+  - [x] orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot — **VERIFIED LIVE**
+  - [x] subagent response is captured and forwarded back to orchestrator with dispatchId — **VERIFIED LIVE** (tool outputs + assistant text via `agent_end`). Caveat: >2000 char payloads fail (Discord limit, needs message splitting).
 - reliability:
-  - transient relay API errors recover within retry budget
-  - timeout paths produce explicit `FAILED` state + operator notice
+  - [ ] transient relay API errors recover within retry budget — **NOT IMPLEMENTED** (no retry logic in v1)
+  - [ ] timeout paths produce explicit `FAILED` state + operator notice — **NOT IMPLEMENTED** (no timeout tracking in v1)
 - transparency:
-  - prompt/response visible in subagent channel
-  - redundant transient completion announce in `#general` suppressed during relay mode
+  - [x] prompt/response visible in subagent channel — **VERIFIED LIVE**
+  - [ ] redundant transient completion announce in `#general` suppressed during relay mode — **CODE EXISTS, NOT TESTED LIVE**
 - safety/security:
-  - no silent fallback to `sessions_spawn`
-  - token is secret-managed and never logged
-  - only mapped channels/agents are accepted in v1
+  - [ ] no silent fallback to `sessions_spawn` — **NOT ENFORCED** (no `before_tool_call` hook blocking `sessions_spawn`)
+  - [x] token is secret-managed and never logged — env var via systemd drop-in, not in code
+  - [x] only mapped channels/agents are accepted in v1 — `V1_TARGET_AGENT = "systems-eng"` enforced
 
 ## 10. Milestone 0 Approval Checklist (required before first code)
 - [x] Scope approved: v1 is CTO-only single-subagent relay (no multi-subagent batching)
