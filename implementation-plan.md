@@ -22,6 +22,7 @@ Acceptance:
 - [ ] Timeout handling
 - [ ] Explicit operator-facing failure messages
 - [ ] No silent fallback path
+- [ ] Long-message strategy (split/segment prompts > Discord limit) — deferred from v1 wiring
 
 Acceptance:
 - [ ] Injected failures are visible and recoverable

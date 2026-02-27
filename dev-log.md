@@ -78,3 +78,20 @@ Use this as the canonical chronological log.
 - Risk introduced: Medium (env-config errors can block dispatch until configured, by design).
 - Rollback note: Revert this commit to return to previous transport behavior.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Applied audit follow-up to Discord transport wiring.
+- Why: Improve correlation readiness and operator diagnostics before response-capture phase.
+- Evidence:
+  - Dispatch marker embedded in posted content: `[relay_dispatch_id:<id>]`
+  - Preflight payload-length check for Discord 2000-char limit
+  - Payload-too-long now returns `rejected/INVALID_PAYLOAD` from `relay_dispatch`
+  - Added JSON env parse error clarity and snowflake format validation for channel/mention IDs
+  - Added transport tests for marker inclusion and overlong-content rejection
+- Risk introduced: Low-medium (strict validation may fail fast on misconfigured envs).
+- Rollback note: Revert this commit to prior adapter behavior.
+
+- Deferred (explicit):
+  - O(n) requestId lookup remains acceptable for v1 volume; index optimization later.
+  - Multi-message split strategy for overlong prompts deferred to Milestone 2 reliability work.
+

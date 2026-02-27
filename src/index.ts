@@ -133,17 +133,20 @@ export async function relay_dispatch(
       // best-effort only
     }
 
+    const errText = String(error);
+    const payloadTooLong = errText.includes("Payload too long for Discord");
+
     logRelay("dispatch.failed", {
       dispatchId,
       targetAgentId: request.targetAgentId,
-      error: String(error)
+      error: errText
     });
     return {
-      status: "failed",
+      status: payloadTooLong ? "rejected" : "failed",
       dispatchId,
-      code: RELAY_CODES.RELAY_UNAVAILABLE,
-      message: "failed to persist or post dispatch",
-      retryable: true
+      code: payloadTooLong ? RELAY_CODES.INVALID_PAYLOAD : RELAY_CODES.RELAY_UNAVAILABLE,
+      message: payloadTooLong ? "dispatch payload exceeds Discord message limit" : "failed to persist or post dispatch",
+      retryable: !payloadTooLong
     };
   }
 }
