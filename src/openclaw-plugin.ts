@@ -2,7 +2,7 @@ import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
 import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
-import { clearArmedDispatch, getArmedDispatch } from "./state.js";
+import { consumeArmedDispatch, setArmedDispatch } from "./state.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -176,27 +176,14 @@ export default function register(api: PluginApi) {
 
   const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 300000);
 
-  async function getArmedDispatchId(agentId: string): Promise<string | undefined> {
-    const armed = await getArmedDispatch(agentId);
+  async function consumeFreshArmedDispatchId(agentId: string): Promise<string | undefined> {
+    const armed = await consumeArmedDispatch(agentId);
     if (!armed) return undefined;
     const ts = Date.parse(armed.armedAt || "");
     if (!Number.isNaN(ts) && Date.now() - ts > armTtlMs) {
-      await clearArmedDispatch(agentId);
       return undefined;
     }
     return armed.dispatchId;
-  }
-
-  async function disarmDispatch(agentId: string, dispatchId?: string) {
-    if (!dispatchId) {
-      await clearArmedDispatch(agentId);
-      return;
-    }
-    const armed = await getArmedDispatch(agentId);
-    if (!armed) return;
-    if (armed.dispatchId === dispatchId) {
-      await clearArmedDispatch(agentId);
-    }
   }
 
   // Capture subagent replies from Discord inbound messages (fallback path for external bots).
@@ -248,7 +235,7 @@ export default function register(api: PluginApi) {
     if (!targetAgentId) return;
     if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
 
-    const armedDispatchId = await getArmedDispatchId(targetAgentId);
+    const armedDispatchId = await consumeFreshArmedDispatchId(targetAgentId);
     if (!armedDispatchId) return;
 
     const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
@@ -262,10 +249,11 @@ export default function register(api: PluginApi) {
       );
       if (result.status === "processed") {
         api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId}`);
-        await disarmDispatch(targetAgentId, result.dispatchId);
+        
       }
       if (result.status === "failed") {
         api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
+        if (armedDispatchId) await setArmedDispatch(targetAgentId, armedDispatchId);
       }
     } catch (err) {
       api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
@@ -293,7 +281,7 @@ export default function register(api: PluginApi) {
     const content = extractAssistantTextFromAgentMessage(event?.message);
     if (!content) return;
 
-    const armedDispatchId = await getArmedDispatchId(targetAgentId);
+    const armedDispatchId = await consumeFreshArmedDispatchId(targetAgentId);
     if (debugOutbound) {
       api.logger.info?.(
         `clawsuite-relay: before_message_write armed targetAgentId=${targetAgentId} armedDispatchId=${armedDispatchId ?? "<none>"} content_len=${content.length}`
@@ -308,10 +296,11 @@ export default function register(api: PluginApi) {
       );
       if (result.status === "processed") {
         api.logger.info?.(`clawsuite-relay: before_message_write captured dispatch ${result.dispatchId}`);
-        await disarmDispatch(targetAgentId, result.dispatchId);
+        
       }
       if (result.status === "failed") {
         api.logger.warn?.(`clawsuite-relay: before_message_write capture failed for dispatch ${result.dispatchId}`);
+        if (armedDispatchId) await setArmedDispatch(targetAgentId, armedDispatchId);
       }
     } catch (err) {
       api.logger.warn?.(`clawsuite-relay: before_message_write capture error (${String(err)})`);

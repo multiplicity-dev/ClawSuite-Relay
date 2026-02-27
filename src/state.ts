@@ -160,6 +160,19 @@ export async function getArmedDispatch(targetAgentId: string): Promise<ArmedDisp
   }
 }
 
+export async function consumeArmedDispatch(targetAgentId: string): Promise<ArmedDispatchRecord | null> {
+  if (!targetAgentId?.trim()) return null;
+  const p = join(getArmedDir(), `${targetAgentId}.json`);
+  try {
+    const raw = await readFile(p, "utf8");
+    const rec = JSON.parse(raw) as ArmedDispatchRecord;
+    await rm(p, { force: true });
+    return rec;
+  } catch {
+    return null;
+  }
+}
+
 export async function clearArmedDispatch(targetAgentId: string) {
   if (!targetAgentId?.trim()) return;
   const p = join(getArmedDir(), `${targetAgentId}.json`);
