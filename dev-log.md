@@ -283,6 +283,17 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Hardened relay tool adapter to fail loud on invalid accepted responses.
+- Why: CEO observed "accepted" dispatches with no concrete dispatchId/file, creating a diagnostic blind spot.
+- Evidence:
+  - `relay-dispatch-tool.ts` now validates accepted responses must include UUID dispatchId.
+  - If not, tool returns explicit failed result (`INVALID_DISPATCH_ID`) instead of ambiguous success.
+  - Tool output normalized to always include `status|dispatchId|targetAgentId|code|message|retryable`.
+- Risk introduced: Low (stricter correctness gate may expose latent upstream errors sooner).
+- Rollback note: revert tool adapter hardening if compatibility issue is discovered.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Added orchestrator-envelope auto-delete to suppress residual user-visible relay leak.
 - Why: Even with duplicate forwarding fixed, one relay envelope message remained visible in orchestrator channel.
 - Evidence:
