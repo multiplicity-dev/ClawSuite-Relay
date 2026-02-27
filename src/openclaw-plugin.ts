@@ -1,10 +1,12 @@
 import { captureSubagentResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
-import { forwardTransportFromEnv } from "./transport-discord.js";
+import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
+import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
   on: (hookName: string, handler: (event: any, ctx: any) => Promise<any> | any) => void;
+  registerTool: (tool: any, opts?: { optional?: boolean }) => void;
 }
 
 function asString(value: unknown): string | undefined {
@@ -35,6 +37,14 @@ export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
 
+  let relayTransport;
+  try {
+    relayTransport = transportFromEnv();
+  } catch (err) {
+    api.logger.warn?.(`clawsuite-relay: relay transport not configured (${String(err)})`);
+    relayTransport = undefined;
+  }
+
   let forwardTransport;
   try {
     forwardTransport = forwardTransportFromEnv();
@@ -42,6 +52,9 @@ export default function register(api: PluginApi) {
     api.logger.warn?.(`clawsuite-relay: forward transport not configured (${String(err)})`);
     forwardTransport = undefined;
   }
+
+  // Register relay_dispatch as a tool the orchestrator can call.
+  api.registerTool(createRelayDispatchTool(relayTransport));
 
   // Capture subagent replies from Discord inbound messages.
   api.on("message_received", async (event, ctx) => {

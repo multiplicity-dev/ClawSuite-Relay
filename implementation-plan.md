@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Draft
+Status: Milestone 1 — Live Activation In Progress
 
 ## Milestone 0 — Design Freeze
 - [x] Approve TDD
@@ -9,14 +9,22 @@ Status: Draft
 
 ## Milestone 1 — Single-Subagent Relay (CTO only)
 - [x] Relay dispatch contract + validation skeleton (`relay_dispatch`) with deterministic status codes
-- [~] Relay post path wired via `RelayTransport` interface + mocked tests (live Discord transport pending)
+- [x] Relay post path wired via `RelayTransport` interface + mocked tests + live Discord transport verified
 - [x] Subagent response capture core flow (`captureSubagentResponse`) with state transitions
 - [x] Forward to orchestrator path via `ForwardTransport` abstraction (+ Discord adapter)
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
-- [~] Suppress redundant transient subagent completion announce in #general when relay mode is active (filter + plugin hook wiring implemented; live deployment integration pending)
+- [x] `relay_dispatch` tool registered via OpenClaw plugin API (TypeBox schema, execute handler)
+- [~] Suppress redundant transient subagent completion announce in #general when relay mode is active (filter + plugin hook wiring implemented; live suppression test pending)
+
+Deployment prerequisites (discovered during activation):
+- [x] Plugin tools require `tools.alsoAllow: ["relay_dispatch"]` in per-agent config (`openclaw.json`)
+- [x] Relay bot messages require `allowBots: true` + relay bot user ID in `users` allowlist (`openclaw.json`)
 
 Acceptance:
-- [ ] End-to-end flow passes in staging
+- [x] Dispatch post path verified (orchestrator → #tech, marker present)
+- [ ] Capture + forward path verified (subagent reply → orchestrator channel)
+- [ ] Suppression path verified (redundant announce cancelled)
+- [ ] Fail-loud path verified (misconfigured transport → explicit failure)
 
 ## Milestone 2 — Reliability & Fail Loudly
 - [ ] Timeout handling

@@ -172,3 +172,45 @@ Use this as the canonical chronological log.
   - `relayEnabled`/`orchestratorChannelId` are read at register-time (restart required for config/env changes), accepted for v1 operational model.
   - Relay-channel allowlist optimization in `message_received` deferred to Milestone 2/3 performance pass.
 
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Created `relay_dispatch` tool for OpenClaw plugin API and wired tool registration.
+- Why: Orchestrator agent cannot call `relay_dispatch` without a registered tool — the function existed but was not exposed via the plugin tool system.
+- Evidence:
+  - New `src/relay-dispatch-tool.ts`: TypeBox parameter schema, tool metadata (name/label/description), `execute()` handler wrapping `relay_dispatch()` with formatted `AgentToolResult` output.
+  - Updated `src/openclaw-plugin.ts`: imports `transportFromEnv` and `createRelayDispatchTool`, initializes relay transport at registration time (with try/catch for missing config), calls `api.registerTool()`.
+  - Updated `PluginApi` interface to include `registerTool`.
+  - Updated `test/openclaw-plugin.test.ts`: added `createMockApi()` helper with `registerTool` tracking, added test for tool registration verification, added test for tool execution with mock transport.
+  - Added `@sinclair/typebox` dependency to `package.json`.
+  - All 25/25 tests passing, typecheck clean.
+- Risk introduced: Low (additive tool registration, no behavior change to hooks).
+- Rollback note: Remove `relay-dispatch-tool.ts` and revert `openclaw-plugin.ts` to prior version.
+
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Discovered and resolved plugin tool visibility requirements for OpenClaw agents.
+- Why: `relay_dispatch` tool was registered but invisible to orchestrator. Two failed attempts before root cause identified.
+- Evidence:
+  - Attempt 1: Registered with `{ optional: true }` — failed because optional tools require explicit `tools.allow` and CEO agent had no allowlist.
+  - Attempt 2: Removed `optional: true` — still failed because ALL plugin tools (optional or not) must be explicitly listed in agent `tools.alsoAllow` config.
+  - Root cause: OpenClaw's `resolvePluginTools()` filters tools against per-agent allowlists. Plugin tool registration makes tools *available* but not *visible* to any agent until configuration grants access.
+  - Fix: Added `"tools": { "alsoAllow": ["relay_dispatch"] }` to `ceo` and `systems-eng` agent entries in `~/.openclaw/openclaw.json`.
+- Risk introduced: Low (configuration-only change).
+- Rollback note: Remove `tools.alsoAllow` entries from agent configs.
+
+- Date/Time: 2026-02-27
+- Author: Claude Code (Opus 4.6)
+- Change: Discovered and resolved relay bot message filtering issue in OpenClaw Discord integration.
+- Why: After successful relay dispatch (message posted to #tech), systems-eng never responded. Relay bot messages were silently dropped.
+- Evidence:
+  - Root cause: OpenClaw defaults to `allowBots: false` — any message with `message.author.bot === true` is dropped before reaching the agent. The relay bot uses a separate Discord bot token, so its messages are bot-authored.
+  - Fix: Added `"allowBots": true` to `channels.discord` config and added relay bot user ID (`1474833207483699252`, decoded from bot token) to `allowFrom` and guild `users` allowlist.
+  - Security note: `allowBots` is account-level only (no per-channel override). Access control maintained via `users` allowlist — only Dave and the relay bot are whitelisted.
+- Risk introduced: Medium (any message from whitelisted bot user ID in any allowed channel will be processed; mitigated by strict `users` allowlist).
+- Rollback note: Remove `allowBots: true` and relay bot user ID from config.
+
+- Deferred (explicit from live activation):
+  - Bot identity: Both orchestrator dispatches and subagent replies display as "openclaw" (single bot name). Per-agent display names would require webhook-based posting or multiple bot tokens.
+  - @mention noise: Relay posts `@climbswithgoats` for routing/gating, but `requireMention: false` means it's unnecessary. The mention map currently points to the human user, not the OpenClaw bot.
+  - Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional but noisy for casual reading.
+

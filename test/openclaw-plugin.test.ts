@@ -17,28 +17,31 @@ test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
 });
 
-test("registers message_received and message_sending hooks", () => {
+function createMockApi() {
   const hooks: Record<string, Function> = {};
-  register({
-    logger: {},
-    on: (name, fn) => {
-      hooks[name] = fn;
-    }
-  });
+  const tools: Array<{ tool: any; opts: any }> = [];
+  const api = {
+    logger: { info: () => {}, warn: () => {} },
+    on: (name: string, fn: Function) => { hooks[name] = fn; },
+    registerTool: (tool: any, opts?: any) => { tools.push({ tool, opts }); }
+  };
+  return { api, hooks, tools };
+}
+
+test("registers hooks and relay_dispatch tool", () => {
+  const { api, hooks, tools } = createMockApi();
+  register(api);
 
   assert.equal(typeof hooks.message_received, "function");
   assert.equal(typeof hooks.message_sending, "function");
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0].tool.name, "relay_dispatch");
+  assert.equal(typeof tools[0].tool.execute, "function");
 });
 
 test("message_received is no-op for non-discord channel", async () => {
-  const hooks: Record<string, Function> = {};
-  const logger = { info: () => {}, warn: () => {} };
-  register({
-    logger,
-    on: (name, fn) => {
-      hooks[name] = fn;
-    }
-  });
+  const { api, hooks } = createMockApi();
+  register(api);
 
   const result = await hooks.message_received(
     { content: "ignored", metadata: { channelId: "systems-eng-channel", messageId: "x" } },
@@ -49,13 +52,8 @@ test("message_received is no-op for non-discord channel", async () => {
 });
 
 test("message_received bails when content missing", async () => {
-  const hooks: Record<string, Function> = {};
-  register({
-    logger: {},
-    on: (name, fn) => {
-      hooks[name] = fn;
-    }
-  });
+  const { api, hooks } = createMockApi();
+  register(api);
 
   const result = await hooks.message_received(
     { content: "", metadata: { channelId: "systems-eng-channel", messageId: "x2" } },
@@ -66,13 +64,8 @@ test("message_received bails when content missing", async () => {
 });
 
 test("message_sending cancels transient announce when correlated dispatch exists", async () => {
-  const hooks: Record<string, Function> = {};
-  register({
-    logger: {},
-    on: (name, fn) => {
-      hooks[name] = fn;
-    }
-  });
+  const { api, hooks } = createMockApi();
+  register(api);
 
   const dispatch = await relay_dispatch(
     { targetAgentId: "systems-eng", task: "work", requestId: "plugin-send-1" },
@@ -101,5 +94,25 @@ test("message_sending cancels transient announce when correlated dispatch exists
   );
 
   assert.deepEqual(result, { cancel: true });
+});
+
+test("relay_dispatch tool executes dispatch with mock transport", async () => {
+  const { tools } = createMockApi();
+  // Build tool directly with a mock transport
+  const { createRelayDispatchTool } = await import("../src/relay-dispatch-tool.js");
+  const mockTransport = {
+    async postToChannel() { return { messageId: "tool-post-1" }; }
+  };
+  const tool = createRelayDispatchTool(mockTransport);
+
+  const result = await tool.execute("call-1", {
+    targetAgentId: "systems-eng",
+    task: "test dispatch via tool"
+  });
+
+  assert.equal(result.content[0].type, "text");
+  assert.match(result.content[0].text, /accepted/i);
+  assert.equal(result.details.status, "accepted");
+  assert.ok(result.details.dispatchId);
 });
 
