@@ -55,3 +55,15 @@ Use this as the canonical chronological log.
 - Risk introduced: Low-medium (API surface expanded with dependency injection).
 - Rollback note: Revert transport commit to restore pre-transport skeleton.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Applied second audit pass fixes for idempotency correctness on failed dispatches.
+- Why: Prevent false "accepted" idempotent replay when prior dispatch never posted.
+- Evidence:
+  - Idempotent replay now allowed only for replayable states (`POSTED_TO_CHANNEL`+), not `CREATED`/`FAILED`
+  - Transport failure path now marks persisted record `FAILED`
+  - Added transport-failure test verifying failed state + non-replay behavior
+  - Failed responses now include `dispatchId` for traceability
+- Risk introduced: Low (behavioral correction + test coverage increase).
+- Rollback note: Revert this commit if needed; previous behavior was less correct.
+

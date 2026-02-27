@@ -71,6 +71,32 @@ test("duplicate requestId returns existing dispatch", async () => {
   assert.match(second.message, /idempotent/i);
 });
 
+test("transport failure marks dispatch failed and does not idempotent-replay", async () => {
+  const throwingTransport = {
+    async postToChannel() {
+      throw new Error("transport down");
+    }
+  };
+
+  const first = await relay_dispatch(
+    { targetAgentId: "systems-eng", task: "run", requestId: "req-fail-1" },
+    { transport: throwingTransport }
+  );
+  assert.equal(first.status, "failed");
+
+  const failedRecord = await loadDispatch(first.dispatchId!);
+  assert.equal(failedRecord?.state, "FAILED");
+
+  const second = await relay_dispatch({
+    targetAgentId: "systems-eng",
+    task: "run",
+    requestId: "req-fail-1"
+  });
+
+  assert.equal(second.status, "accepted");
+  assert.notEqual(second.dispatchId, first.dispatchId);
+});
+
 test("invalid dispatchId path traversal is rejected", async () => {
   const traversal = await loadDispatch("../../etc/passwd");
   assert.equal(traversal, null);

@@ -23,6 +23,15 @@ function invalid(message: string): RelayDispatchResponse {
   };
 }
 
+function isReplayableState(state: DispatchRecord["state"]): boolean {
+  return (
+    state === "POSTED_TO_CHANNEL" ||
+    state === "SUBAGENT_RESPONDED" ||
+    state === "FORWARDED_TO_ORCHESTRATOR" ||
+    state === "COMPLETED"
+  );
+}
+
 export async function relay_dispatch(
   request: RelayDispatchRequest,
   deps: RelayDispatchDeps = {}
@@ -43,11 +52,12 @@ export async function relay_dispatch(
 
   if (request.requestId?.trim()) {
     const existing = await findDispatchByRequestId(request.requestId);
-    if (existing) {
+    if (existing && isReplayableState(existing.state)) {
       logRelay("dispatch.idempotent_hit", {
         dispatchId: existing.dispatchId,
         requestId: request.requestId,
-        targetAgentId: existing.targetAgentId
+        targetAgentId: existing.targetAgentId,
+        state: existing.state
       });
       return {
         status: "accepted",
@@ -55,6 +65,15 @@ export async function relay_dispatch(
         message: "dispatch accepted (idempotent replay)",
         retryable: false
       };
+    }
+
+    if (existing) {
+      logRelay("dispatch.idempotent_stale", {
+        dispatchId: existing.dispatchId,
+        requestId: request.requestId,
+        state: existing.state,
+        action: "new_dispatch_created"
+      });
     }
   }
 
@@ -105,6 +124,15 @@ export async function relay_dispatch(
       retryable: false
     };
   } catch (error) {
+    try {
+      await updateDispatch({
+        ...record,
+        state: "FAILED"
+      });
+    } catch {
+      // best-effort only
+    }
+
     logRelay("dispatch.failed", {
       dispatchId,
       targetAgentId: request.targetAgentId,
@@ -112,6 +140,7 @@ export async function relay_dispatch(
     });
     return {
       status: "failed",
+      dispatchId,
       code: RELAY_CODES.RELAY_UNAVAILABLE,
       message: "failed to persist or post dispatch",
       retryable: true
