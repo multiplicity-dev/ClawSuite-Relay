@@ -25,6 +25,10 @@ function canCaptureFromState(state: DispatchRecord["state"]): boolean {
   return state === "POSTED_TO_CHANNEL" || state === "SUBAGENT_RESPONDED";
 }
 
+function isLikelyRelayEnvelope(content: string): boolean {
+  return content.includes("[relay_subagent_message_id:") || content.startsWith("Subagent response received for ");
+}
+
 export function extractDispatchId(content: string): string | null {
   return extractRelayDispatchId(content);
 }
@@ -50,6 +54,18 @@ export async function captureSubagentResponse(
   }
   if (!canCaptureFromState(dispatch.state)) {
     return { status: "ignored", dispatchId: dispatch.dispatchId, reason: `state_${dispatch.state}` };
+  }
+
+  if (isLikelyRelayEnvelope(event.content)) {
+    return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "relay_envelope" };
+  }
+
+  if (
+    dispatch.subagentResponseMessageId &&
+    dispatch.forwardedMessageId &&
+    dispatch.subagentResponseMessageId === event.messageId
+  ) {
+    return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "already_forwarded" };
   }
 
   try {

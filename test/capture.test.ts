@@ -32,6 +32,33 @@ test("capture ignores unrelated message", async () => {
   assert.equal(res.reason, "no_dispatch_match");
 });
 
+test("capture ignores relay envelope content to avoid self-echo", async () => {
+  const dispatchTransport = {
+    async postToChannel() {
+      return { messageId: "post-echo-1" };
+    }
+  };
+
+  const dispatch = await relay_dispatch(
+    { targetAgentId: "systems-eng", task: "echo-test", requestId: "capture-echo-1" },
+    { transport: dispatchTransport }
+  );
+
+  const res = await captureSubagentResponse({
+    channelId: "systems-eng-channel",
+    messageId: "relay-envelope-1",
+    referencedMessageId: "post-echo-1",
+    content:
+      "Subagent response received for systems-eng. done [relay_dispatch_id:abc] [relay_subagent_message_id:def]"
+  });
+
+  assert.equal(res.status, "ignored");
+  assert.equal(res.reason, "relay_envelope");
+
+  const state = await loadDispatch(dispatch.dispatchId!);
+  assert.equal(state?.state, "POSTED_TO_CHANNEL");
+});
+
 test("capture by referencedMessageId forwards and completes dispatch", async () => {
   const dispatchTransport = {
     async postToChannel() {
