@@ -1,15 +1,12 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { DispatchRecord } from "./types.js";
 
-const DEFAULT_BASE_DIR = join(
-  homedir(),
-  ".openclaw",
-  "extensions",
-  "relay-bridge",
-  "dispatches"
-);
+const RELAY_BASE_DIR = join(homedir(), ".openclaw", "extensions", "relay-bridge");
+
+const DEFAULT_BASE_DIR = join(RELAY_BASE_DIR, "dispatches");
+const DEFAULT_ARMED_DIR = join(RELAY_BASE_DIR, "armed");
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,12 +15,20 @@ export function getDispatchDir(): string {
   return process.env.CLAWSUITE_RELAY_DISPATCH_DIR || DEFAULT_BASE_DIR;
 }
 
+export function getArmedDir(): string {
+  return process.env.CLAWSUITE_RELAY_ARMED_DIR || DEFAULT_ARMED_DIR;
+}
+
 export function isValidDispatchId(dispatchId: string): boolean {
   return UUID_RE.test(dispatchId);
 }
 
 export async function ensureDispatchDir() {
   await mkdir(getDispatchDir(), { recursive: true });
+}
+
+export async function ensureArmedDir() {
+  await mkdir(getArmedDir(), { recursive: true });
 }
 
 export async function saveDispatch(record: DispatchRecord) {
@@ -125,6 +130,40 @@ export async function findPendingDispatchForAgent(
     }
   }
   return best;
+}
+
+export interface ArmedDispatchRecord {
+  targetAgentId: string;
+  dispatchId: string;
+  armedAt: string;
+}
+
+export async function setArmedDispatch(targetAgentId: string, dispatchId: string) {
+  await ensureArmedDir();
+  const rec: ArmedDispatchRecord = {
+    targetAgentId,
+    dispatchId,
+    armedAt: new Date().toISOString()
+  };
+  const p = join(getArmedDir(), `${targetAgentId}.json`);
+  await writeFile(p, JSON.stringify(rec, null, 2), "utf8");
+}
+
+export async function getArmedDispatch(targetAgentId: string): Promise<ArmedDispatchRecord | null> {
+  if (!targetAgentId?.trim()) return null;
+  try {
+    const p = join(getArmedDir(), `${targetAgentId}.json`);
+    const raw = await readFile(p, "utf8");
+    return JSON.parse(raw) as ArmedDispatchRecord;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearArmedDispatch(targetAgentId: string) {
+  if (!targetAgentId?.trim()) return;
+  const p = join(getArmedDir(), `${targetAgentId}.json`);
+  await rm(p, { force: true });
 }
 
 export async function findDispatchByRequestId(

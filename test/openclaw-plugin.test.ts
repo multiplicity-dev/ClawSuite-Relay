@@ -13,7 +13,7 @@ process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
-const { saveDispatch, loadDispatch } = await import("../src/state.js");
+const { saveDispatch, loadDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -115,6 +115,9 @@ test("before_message_write captures only after dispatch is armed", async () => {
   const { api, hooks } = createMockApi();
   register(api);
 
+  // Ensure no prior arming residue from other tests.
+  await clearArmedDispatch("systems-eng");
+
   // Without arming, should no-op.
   const noArm = await hooks.before_message_write(
     {
@@ -127,17 +130,8 @@ test("before_message_write captures only after dispatch is armed", async () => {
   const stillPending = await loadDispatch(dispatchId);
   assert.equal(stillPending?.state, "POSTED_TO_CHANNEL");
 
-  // Arm via inbound relay dispatch message in mapped channel.
-  await hooks.message_received(
-    {
-      content: `<@794579141801934879> task [relay_dispatch_id:${dispatchId}]`,
-      metadata: {
-        channelId: "9999999999999999999",
-        messageId: "posted-plugin-outbound-1"
-      }
-    },
-    { channelId: "discord", conversationId: "9999999999999999999" }
-  );
+  // Arm directly via persistent state (relay_dispatch now sets this in runtime).
+  await setArmedDispatch("systems-eng", dispatchId);
 
   const armed = await hooks.before_message_write(
     {

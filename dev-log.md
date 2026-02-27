@@ -261,6 +261,17 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Switched dispatch arming source from inbound marker observation to persistent state set at dispatch creation.
+- Why: `message_received` of relay-bot dispatch posts was not reliable, causing unarmed `POSTED_TO_CHANNEL` stalls.
+- Evidence:
+  - Added persistent armed-state helpers in `state.ts` (`setArmedDispatch/getArmedDispatch/clearArmedDispatch`).
+  - `relay_dispatch` now arms target agent immediately after successful post.
+  - Plugin now reads armed state from storage in `before_message_write`/`agent_end` rather than in-memory marker arming.
+- Risk introduced: Low-medium (state consistency now depends on armed-file lifecycle).
+- Rollback note: revert arming-source commit if regression appears.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:
