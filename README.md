@@ -41,6 +41,7 @@ Configure via environment variables (typically in a systemd drop-in):
 - `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
 - `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
 - `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
+- `CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES` — `1` (default) to auto-delete relay envelope messages in orchestrator channel after receipt
 
 Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`):
 ```ini
@@ -58,7 +59,7 @@ This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.
 - `message_sending` → outbound capture (for agent responses to subagent channels) + announce suppression
 - `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
 
-**Note:** The `message_sending` hook may not fire for embedded agent responses (see `live-activation-runbook.md`). This is the current blocking issue for the return path.
+**Note:** The `message_sending` hook pipeline is confirmed working for all outbound messages (verified via gateway source analysis). The current blocking issue is that systems-eng (GPT-5.3) posts empty-content responses to relay dispatches. See `live-activation-runbook.md` for details and investigation next steps.
 
 Typical local load path:
 ```bash

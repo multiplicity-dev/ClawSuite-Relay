@@ -283,6 +283,16 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Added orchestrator-envelope auto-delete to suppress residual user-visible relay leak.
+- Why: Even with duplicate forwarding fixed, one relay envelope message remained visible in orchestrator channel.
+- Evidence:
+  - On `message_received`, when envelope is bot-authored in orchestrator channel, plugin now best-effort deletes the message via Discord API.
+  - Controlled by `CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES` (default on).
+- Risk introduced: Low-medium (depends on bot message delete permission in orchestrator channel).
+- Rollback note: set env flag to `0` or revert commit if message retention is preferred.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:

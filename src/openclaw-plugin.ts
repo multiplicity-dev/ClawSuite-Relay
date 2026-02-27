@@ -52,6 +52,20 @@ function resolveAuthorId(event: any): string | undefined {
   );
 }
 
+async function deleteDiscordMessage(
+  botToken: string | undefined,
+  channelId: string,
+  messageId: string
+): Promise<void> {
+  if (!botToken) return;
+  await fetch(`https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bot ${botToken}`
+    }
+  });
+}
+
 function deriveDiscordBotUserIdFromToken(token: string | undefined): string | undefined {
   if (!token) return undefined;
   const head = token.split(".")[0];
@@ -136,7 +150,10 @@ export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
   const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
-  const relayBotUserId = deriveDiscordBotUserIdFromToken(process.env.CLAWSUITE_RELAY_BOT_TOKEN);
+  const relayBotToken = process.env.CLAWSUITE_RELAY_BOT_TOKEN;
+  const relayBotUserId = deriveDiscordBotUserIdFromToken(relayBotToken);
+  const autoDeleteOrchestratorEnvelopes =
+    process.env.CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES !== "0";
 
   let relayTransport;
   try {
@@ -202,6 +219,25 @@ export default function register(api: PluginApi) {
 
     // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
     const authorId = resolveAuthorId(event);
+    const messageId = resolveMessageId(event);
+
+    // In orchestrator channel, auto-delete relay envelope after receipt to suppress user-visible leak.
+    if (
+      autoDeleteOrchestratorEnvelopes &&
+      orchestratorChannelId &&
+      channelId === orchestratorChannelId &&
+      relayBotUserId &&
+      authorId === relayBotUserId &&
+      messageId &&
+      content.startsWith("Subagent response received for ")
+    ) {
+      try {
+        await deleteDiscordMessage(relayBotToken, channelId, messageId);
+      } catch {
+        // best-effort only
+      }
+    }
+
     if (relayBotUserId && authorId === relayBotUserId) return;
     if (content.includes("[relay_subagent_message_id:")) return;
     if (content.startsWith("Subagent response received for ")) return;
