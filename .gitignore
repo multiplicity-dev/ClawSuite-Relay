@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Logs
 logs
 *.log
@@ -137,3 +138,12 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+=======
+node_modules/
+dist/
+.env
+.env.*
+coverage/
+.DS_Store
+*.log
+>>>>>>> 93fe4fb (docs: initialize ClawSuite-Relay baseline (orchestrator/subagent model))
