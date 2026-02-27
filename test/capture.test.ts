@@ -259,6 +259,49 @@ test("captureOutboundResponse forwards when pending dispatch exists for agent", 
   assert.equal(updated?.forwardedMessageId, "fwd-outbound-1");
 });
 
+test("captureOutboundResponse dedupes concurrent duplicate attempts", async () => {
+  const dispatchId = "00000000-0000-1000-8000-000000000088";
+  await saveDispatch({
+    dispatchId,
+    targetAgentId: "outbound-dedupe-agent",
+    task: "outbound dedupe",
+    state: "POSTED_TO_CHANNEL",
+    postedMessageId: "posted-outbound-2",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  let count = 0;
+  const forwardTransport = {
+    async forwardToOrchestrator() {
+      count += 1;
+      await new Promise((r) => setTimeout(r, 20));
+      return { messageId: `fwd-dedupe-${count}` };
+    }
+  };
+
+  const [a, b] = await Promise.all([
+    captureOutboundResponse(
+      { targetAgentId: "outbound-dedupe-agent", content: "dup" },
+      { forwardTransport }
+    ),
+    captureOutboundResponse(
+      { targetAgentId: "outbound-dedupe-agent", content: "dup" },
+      { forwardTransport }
+    )
+  ]);
+
+  const processed = [a, b].filter((x) => x.status === "processed").length;
+  const ignored = [a, b].filter((x) => x.status === "ignored").length;
+  assert.equal(processed, 1);
+  assert.equal(ignored, 1);
+  assert.equal(count, 1);
+
+  const updated = await loadDispatch(dispatchId);
+  assert.equal(updated?.state, "COMPLETED");
+  assert.ok(updated?.forwardedMessageId?.startsWith("fwd-dedupe-"));
+});
+
 test("captureOutboundResponse ignores when no pending dispatch for agent", async () => {
   const result = await captureOutboundResponse(
     { targetAgentId: "unknown-agent", content: "no dispatch" },

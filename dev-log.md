@@ -272,6 +272,17 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Added atomic forward lock + consume-once arming to eliminate duplicate forwards.
+- Why: Live validation still showed two near-simultaneous identical forwards for a single dispatch.
+- Evidence:
+  - Forward lock (`locks/<dispatchId>.lock`) prevents concurrent duplicate forward execution.
+  - Arming now consumed-once per agent dispatch; re-armed only on forward failure.
+  - Added concurrent duplicate-capture regression test in `capture.test.ts`.
+- Risk introduced: Low-medium (lock-file lifecycle adds state coupling).
+- Rollback note: revert lock/consume commit if lock contention causes dropped forwards.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:

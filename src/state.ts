@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rm, open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { DispatchRecord } from "./types.js";
@@ -7,6 +7,7 @@ const RELAY_BASE_DIR = join(homedir(), ".openclaw", "extensions", "relay-bridge"
 
 const DEFAULT_BASE_DIR = join(RELAY_BASE_DIR, "dispatches");
 const DEFAULT_ARMED_DIR = join(RELAY_BASE_DIR, "armed");
+const DEFAULT_LOCKS_DIR = join(RELAY_BASE_DIR, "locks");
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,6 +20,10 @@ export function getArmedDir(): string {
   return process.env.CLAWSUITE_RELAY_ARMED_DIR || DEFAULT_ARMED_DIR;
 }
 
+export function getLocksDir(): string {
+  return process.env.CLAWSUITE_RELAY_LOCKS_DIR || DEFAULT_LOCKS_DIR;
+}
+
 export function isValidDispatchId(dispatchId: string): boolean {
   return UUID_RE.test(dispatchId);
 }
@@ -29,6 +34,10 @@ export async function ensureDispatchDir() {
 
 export async function ensureArmedDir() {
   await mkdir(getArmedDir(), { recursive: true });
+}
+
+export async function ensureLocksDir() {
+  await mkdir(getLocksDir(), { recursive: true });
 }
 
 export async function saveDispatch(record: DispatchRecord) {
@@ -176,6 +185,25 @@ export async function consumeArmedDispatch(targetAgentId: string): Promise<Armed
 export async function clearArmedDispatch(targetAgentId: string) {
   if (!targetAgentId?.trim()) return;
   const p = join(getArmedDir(), `${targetAgentId}.json`);
+  await rm(p, { force: true });
+}
+
+export async function tryAcquireForwardLock(dispatchId: string): Promise<boolean> {
+  if (!isValidDispatchId(dispatchId)) return false;
+  await ensureLocksDir();
+  const p = join(getLocksDir(), `${dispatchId}.lock`);
+  try {
+    const fh = await open(p, "wx");
+    await fh.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function releaseForwardLock(dispatchId: string) {
+  if (!isValidDispatchId(dispatchId)) return;
+  const p = join(getLocksDir(), `${dispatchId}.lock`);
   await rm(p, { force: true });
 }
 

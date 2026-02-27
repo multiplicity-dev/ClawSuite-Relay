@@ -1,5 +1,5 @@
 import { logRelay } from "./logger.js";
-import { loadDispatch, findDispatchByPostedMessageId, findPendingDispatchForAgent, updateDispatch } from "./state.js";
+import { loadDispatch, findDispatchByPostedMessageId, findPendingDispatchForAgent, releaseForwardLock, tryAcquireForwardLock, updateDispatch } from "./state.js";
 import { type ForwardTransport, UnconfiguredForwardTransport } from "./forward.js";
 import { extractRelayDispatchId } from "./markers.js";
 import type { DispatchRecord } from "./types.js";
@@ -130,6 +130,15 @@ export async function captureOutboundResponse(
 
   if (!dispatch) return { status: "ignored", reason: "no_pending_dispatch" };
 
+  if (dispatch.forwardedMessageId) {
+    return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "already_forwarded" };
+  }
+
+  const locked = await tryAcquireForwardLock(dispatch.dispatchId);
+  if (!locked) {
+    return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "forward_inflight" };
+  }
+
   try {
     await updateDispatch({
       ...dispatch,
@@ -162,5 +171,7 @@ export async function captureOutboundResponse(
       error: String(error)
     });
     return { status: "failed", dispatchId: dispatch.dispatchId, reason: "forward_failed" };
+  } finally {
+    await releaseForwardLock(dispatch.dispatchId);
   }
 }
