@@ -131,3 +131,15 @@ Use this as the canonical chronological log.
 - Risk introduced: Low (logic is isolated; no runtime interception wired yet).
 - Rollback note: Revert filter commit if suppression strategy changes.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Applied announce-filter audit follow-ups.
+- Why: Improve maintainability and observability before runtime hook integration.
+- Evidence:
+  - Deduplicated marker parsing via shared `src/markers.ts`
+  - Added explicit suppression-state gating (`SUBAGENT_RESPONDED`+)
+  - Added `announce.suppressed` structured logs with correlation path
+  - Expanded tests for channel mismatch, unknown marker dispatch, and failed-dispatch non-suppression
+- Risk introduced: Low (predicate behavior made stricter, with added tests).
+- Rollback note: Revert this commit if suppression-state policy changes.
+

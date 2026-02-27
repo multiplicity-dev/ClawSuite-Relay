@@ -1,9 +1,8 @@
 import { logRelay } from "./logger.js";
 import { loadDispatch, findDispatchByPostedMessageId, updateDispatch } from "./state.js";
 import { type ForwardTransport, UnconfiguredForwardTransport } from "./forward.js";
+import { extractRelayDispatchId } from "./markers.js";
 import type { DispatchRecord } from "./types.js";
-
-const MARKER_RE = /\[relay_dispatch_id:([a-zA-Z0-9-]+)\]/;
 
 export interface SubagentMessageEvent {
   channelId: string;
@@ -27,8 +26,7 @@ function canCaptureFromState(state: DispatchRecord["state"]): boolean {
 }
 
 export function extractDispatchId(content: string): string | null {
-  const m = content.match(MARKER_RE);
-  return m?.[1] ?? null;
+  return extractRelayDispatchId(content);
 }
 
 export async function captureSubagentResponse(

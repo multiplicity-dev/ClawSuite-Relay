@@ -1,6 +1,6 @@
 import { findDispatchBySubagentResponseMessageId, loadDispatch } from "./state.js";
-
-const MARKER_RE = /\[relay_dispatch_id:([a-zA-Z0-9-]+)\]/;
+import { extractRelayDispatchId } from "./markers.js";
+import { logRelay } from "./logger.js";
 
 export interface GeneralAnnounceEvent {
   channelId: string;
@@ -13,9 +13,8 @@ export interface AnnounceFilterConfig {
   orchestratorChannelId?: string;
 }
 
-function extractDispatchId(content: string): string | null {
-  const m = content.match(MARKER_RE);
-  return m?.[1] ?? null;
+function isSuppressibleState(state: string): boolean {
+  return state === "SUBAGENT_RESPONDED" || state === "FORWARDED_TO_ORCHESTRATOR" || state === "COMPLETED";
 }
 
 export async function shouldSuppressTransientGeneralAnnounce(
@@ -28,12 +27,28 @@ export async function shouldSuppressTransientGeneralAnnounce(
 
   if (event.relatedSubagentMessageId) {
     const byMessageId = await findDispatchBySubagentResponseMessageId(event.relatedSubagentMessageId);
-    if (byMessageId) return true;
+    if (byMessageId && isSuppressibleState(byMessageId.state)) {
+      logRelay("announce.suppressed", {
+        dispatchId: byMessageId.dispatchId,
+        correlationPath: "related_subagent_message_id",
+        channelId: event.channelId
+      });
+      return true;
+    }
   }
 
-  const dispatchId = extractDispatchId(event.content);
+  const dispatchId = extractRelayDispatchId(event.content);
   if (!dispatchId) return false;
 
   const dispatch = await loadDispatch(dispatchId);
-  return Boolean(dispatch);
+  if (dispatch && isSuppressibleState(dispatch.state)) {
+    logRelay("announce.suppressed", {
+      dispatchId: dispatch.dispatchId,
+      correlationPath: "marker",
+      channelId: event.channelId
+    });
+    return true;
+  }
+
+  return false;
 }
