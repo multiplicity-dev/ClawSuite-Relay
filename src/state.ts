@@ -44,6 +44,13 @@ export async function loadDispatch(dispatchId: string): Promise<DispatchRecord |
   }
 }
 
+export async function updateDispatch(record: DispatchRecord) {
+  return saveDispatch({
+    ...record,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 export async function findDispatchByRequestId(
   requestId: string
 ): Promise<DispatchRecord | null> {

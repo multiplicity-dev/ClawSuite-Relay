@@ -45,6 +45,7 @@ export interface DispatchRecord {
   targetAgentId: string;
   task: string;
   state: DispatchState;
+  postedMessageId?: string;
   createdAt: string;
   updatedAt: string;
 }

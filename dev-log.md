@@ -44,3 +44,14 @@ Use this as the canonical chronological log.
 - Risk introduced: Low (contained changes, expanded tests).
 - Rollback note: Revert this follow-up commit; previous skeleton remains intact.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Added `RelayTransport` interface and injected transport flow in `relay_dispatch`.
+- Why: Keep core dispatch logic testable and decouple network posting from orchestration state transitions.
+- Evidence:
+  - New `src/transport.ts` with interface + noop transport
+  - `relay_dispatch` now accepts deps `{ transport }`, posts via transport, and transitions state to `POSTED_TO_CHANNEL`
+  - Tests updated with mocked transport asserting call and persisted `postedMessageId`
+- Risk introduced: Low-medium (API surface expanded with dependency injection).
+- Rollback note: Revert transport commit to restore pre-transport skeleton.
+

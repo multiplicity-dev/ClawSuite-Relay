@@ -9,7 +9,7 @@ Status: Draft
 
 ## Milestone 1 — Single-Subagent Relay (CTO only)
 - [x] Relay dispatch contract + validation skeleton (`relay_dispatch`) with deterministic status codes
-- [ ] Relay post to target channel
+- [~] Relay post path wired via `RelayTransport` interface + mocked tests (live Discord transport pending)
 - [ ] Subagent response capture
 - [ ] Forward to orchestrator
 - [x] Basic correlation IDs (`dispatchId` lifecycle)

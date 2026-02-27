@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logRelay } from "./logger.js";
-import { findDispatchByRequestId, saveDispatch } from "./state.js";
+import { findDispatchByRequestId, saveDispatch, updateDispatch } from "./state.js";
+import { NoopRelayTransport, type RelayTransport } from "./transport.js";
 import {
   RELAY_CODES,
   V1_TARGET_AGENT,
@@ -8,6 +9,10 @@ import {
   type RelayDispatchRequest,
   type RelayDispatchResponse
 } from "./types.js";
+
+export interface RelayDispatchDeps {
+  transport?: RelayTransport;
+}
 
 function invalid(message: string): RelayDispatchResponse {
   return {
@@ -19,8 +24,11 @@ function invalid(message: string): RelayDispatchResponse {
 }
 
 export async function relay_dispatch(
-  request: RelayDispatchRequest
+  request: RelayDispatchRequest,
+  deps: RelayDispatchDeps = {}
 ): Promise<RelayDispatchResponse> {
+  const transport = deps.transport ?? new NoopRelayTransport();
+
   if (!request?.targetAgentId?.trim()) return invalid("targetAgentId is required");
   if (!request?.task?.trim()) return invalid("task is required");
 
@@ -71,6 +79,25 @@ export async function relay_dispatch(
       state: record.state
     });
 
+    const post = await transport.postToChannel({
+      dispatchId,
+      targetAgentId: request.targetAgentId,
+      task: request.task
+    });
+
+    await updateDispatch({
+      ...record,
+      state: "POSTED_TO_CHANNEL",
+      postedMessageId: post.messageId
+    });
+
+    logRelay("dispatch.posted", {
+      dispatchId,
+      targetAgentId: request.targetAgentId,
+      postedMessageId: post.messageId,
+      state: "POSTED_TO_CHANNEL"
+    });
+
     return {
       status: "accepted",
       dispatchId,
@@ -86,7 +113,7 @@ export async function relay_dispatch(
     return {
       status: "failed",
       code: RELAY_CODES.RELAY_UNAVAILABLE,
-      message: "failed to persist dispatch",
+      message: "failed to persist or post dispatch",
       retryable: true
     };
   }

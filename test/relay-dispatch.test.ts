@@ -27,15 +27,30 @@ test("rejects missing task", async () => {
   assert.equal(res.code, "INVALID_PAYLOAD");
 });
 
-test("accepted dispatch is persisted", async () => {
-  const res = await relay_dispatch({ targetAgentId: "systems-eng", task: "run check" });
+test("accepted dispatch is persisted and posted", async () => {
+  const calls: Array<{ dispatchId: string; targetAgentId: string; task: string }> = [];
+  const mockTransport = {
+    async postToChannel(req: { dispatchId: string; targetAgentId: string; task: string }) {
+      calls.push(req);
+      return { messageId: "m-1" };
+    }
+  };
+
+  const res = await relay_dispatch(
+    { targetAgentId: "systems-eng", task: "run check" },
+    { transport: mockTransport }
+  );
   assert.equal(res.status, "accepted");
   assert.ok(res.dispatchId);
 
   const stored = await loadDispatch(res.dispatchId!);
   assert.ok(stored);
   assert.equal(stored?.targetAgentId, "systems-eng");
-  assert.equal(stored?.state, "CREATED");
+  assert.equal(stored?.state, "POSTED_TO_CHANNEL");
+  assert.equal(stored?.postedMessageId, "m-1");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.targetAgentId, "systems-eng");
 });
 
 test("duplicate requestId returns existing dispatch", async () => {
