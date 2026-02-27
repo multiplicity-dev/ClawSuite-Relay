@@ -51,6 +51,25 @@ export async function updateDispatch(record: DispatchRecord) {
   });
 }
 
+export async function findDispatchByPostedMessageId(
+  postedMessageId: string
+): Promise<DispatchRecord | null> {
+  if (!postedMessageId?.trim()) return null;
+  await ensureDispatchDir();
+  const files = await readdir(getDispatchDir());
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const raw = await readFile(join(getDispatchDir(), file), "utf8");
+      const parsed = JSON.parse(raw) as DispatchRecord;
+      if (parsed.postedMessageId === postedMessageId) return parsed;
+    } catch {
+      // ignore malformed/unreadable files in v1
+    }
+  }
+  return null;
+}
+
 export async function findDispatchByRequestId(
   requestId: string
 ): Promise<DispatchRecord | null> {

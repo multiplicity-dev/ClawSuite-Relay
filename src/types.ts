@@ -46,6 +46,8 @@ export interface DispatchRecord {
   task: string;
   state: DispatchState;
   postedMessageId?: string;
+  subagentResponseMessageId?: string;
+  forwardedMessageId?: string;
   createdAt: string;
   updatedAt: string;
 }

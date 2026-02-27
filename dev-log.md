@@ -95,3 +95,15 @@ Use this as the canonical chronological log.
   - O(n) requestId lookup remains acceptable for v1 volume; index optimization later.
   - Multi-message split strategy for overlong prompts deferred to Milestone 2 reliability work.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Wired subagent response-capture + forward-to-orchestrator core path.
+- Why: Complete remaining Milestone 1 core flow before live hook integration.
+- Evidence:
+  - Added `src/capture.ts` with `captureSubagentResponse` + marker extraction + state-gated processing
+  - Added `src/forward.ts` interfaces and fail-loud default forward transport
+  - Added `DiscordForwardTransport` + `forwardTransportFromEnv` in `src/transport-discord.ts`
+  - Added tests for reference-based capture, marker fallback, and forward completion state
+- Risk introduced: Medium (forward path depends on correct orchestrator channel config).
+- Rollback note: Revert capture/forward commit to return to dispatch-only flow.
+

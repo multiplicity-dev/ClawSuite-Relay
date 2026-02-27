@@ -10,8 +10,8 @@ Status: Draft
 ## Milestone 1 — Single-Subagent Relay (CTO only)
 - [x] Relay dispatch contract + validation skeleton (`relay_dispatch`) with deterministic status codes
 - [~] Relay post path wired via `RelayTransport` interface + mocked tests (live Discord transport pending)
-- [ ] Subagent response capture
-- [ ] Forward to orchestrator
+- [x] Subagent response capture core flow (`captureSubagentResponse`) with state transitions
+- [x] Forward to orchestrator path via `ForwardTransport` abstraction (+ Discord adapter)
 - [x] Basic correlation IDs (`dispatchId` lifecycle)
 - [ ] Suppress redundant transient subagent completion announce in #general when relay mode is active
 

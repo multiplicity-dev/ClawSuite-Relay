@@ -26,6 +26,7 @@ To use the real Discord relay transport, configure:
 - `CLAWSUITE_RELAY_BOT_TOKEN` — relay bot token
 - `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
 - `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
+- `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses
 
 Example:
 ```bash
