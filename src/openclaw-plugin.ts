@@ -17,6 +17,16 @@ function resolveChannelId(event: any, ctx: any): string | undefined {
   return asString(event?.metadata?.channelId) ?? asString(ctx?.conversationId) ?? asString(event?.to);
 }
 
+function isDiscordHookContext(event: any, ctx: any): boolean {
+  const candidates = [
+    asString(ctx?.channelId),
+    asString(event?.channel),
+    asString(event?.metadata?.channel),
+    asString(event?.metadata?.provider)
+  ];
+  return candidates.some((c) => c === "discord");
+}
+
 function resolveMessageId(event: any): string | undefined {
   return asString(event?.metadata?.messageId) ?? asString(event?.id) ?? asString(event?.messageId);
 }
@@ -107,8 +117,12 @@ export default function register(api: PluginApi) {
 
   // Capture subagent replies from Discord inbound messages (fallback path for external bots).
   api.on("message_received", async (event, ctx) => {
-    if (ctx.channelId !== "discord") return;
+    if (!isDiscordHookContext(event, ctx)) return;
     if (!relayEnabled) return;
+
+    if (debugOutbound) {
+      api.logger.info?.(`clawsuite-relay: message_received ctx=${JSON.stringify({ channelId: ctx?.channelId, conversationId: ctx?.conversationId, eventChannel: event?.channel, metaChannel: event?.metadata?.channel, metaProvider: event?.metadata?.provider })}`);
+    }
 
     const channelId = resolveChannelId(event, ctx);
     const messageId = resolveMessageId(event);
@@ -139,7 +153,7 @@ export default function register(api: PluginApi) {
 
   // Outbound capture + announce suppression (single modifying hook).
   api.on("message_sending", async (event, ctx) => {
-    if (ctx.channelId !== "discord") return;
+    if (!isDiscordHookContext(event, ctx)) return;
 
     const channelId = resolveChannelId(event, ctx);
     if (!channelId) return;
