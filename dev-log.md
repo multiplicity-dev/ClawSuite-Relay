@@ -67,3 +67,14 @@ Use this as the canonical chronological log.
 - Risk introduced: Low (behavioral correction + test coverage increase).
 - Rollback note: Revert this commit if needed; previous behavior was less correct.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Added concrete Discord transport adapter and fail-loud default transport behavior.
+- Why: Progress Milestone 1 from abstract transport to real integration-ready wiring.
+- Evidence:
+  - `src/transport-discord.ts` added (`DiscordRelayTransport`, `transportFromEnv`)
+  - default transport changed to `UnconfiguredRelayTransport` (throws by default)
+  - tests updated for explicit transport injection and unconfigured-fail path
+- Risk introduced: Medium (env-config errors can block dispatch until configured, by design).
+- Rollback note: Revert this commit to return to previous transport behavior.
+

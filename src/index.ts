@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logRelay } from "./logger.js";
 import { findDispatchByRequestId, saveDispatch, updateDispatch } from "./state.js";
-import { NoopRelayTransport, type RelayTransport } from "./transport.js";
+import { UnconfiguredRelayTransport, type RelayTransport } from "./transport.js";
 import {
   RELAY_CODES,
   V1_TARGET_AGENT,
@@ -36,7 +36,7 @@ export async function relay_dispatch(
   request: RelayDispatchRequest,
   deps: RelayDispatchDeps = {}
 ): Promise<RelayDispatchResponse> {
-  const transport = deps.transport ?? new NoopRelayTransport();
+  const transport = deps.transport ?? new UnconfiguredRelayTransport();
 
   if (!request?.targetAgentId?.trim()) return invalid("targetAgentId is required");
   if (!request?.task?.trim()) return invalid("task is required");

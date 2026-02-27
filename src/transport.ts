@@ -12,8 +12,8 @@ export interface RelayTransport {
   postToChannel(request: RelayPostRequest): Promise<RelayPostResult>;
 }
 
-export class NoopRelayTransport implements RelayTransport {
+export class UnconfiguredRelayTransport implements RelayTransport {
   async postToChannel(_request: RelayPostRequest): Promise<RelayPostResult> {
-    return { messageId: "noop" };
+    throw new Error("Relay transport is not configured");
   }
 }

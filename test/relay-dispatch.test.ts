@@ -54,16 +54,28 @@ test("accepted dispatch is persisted and posted", async () => {
 });
 
 test("duplicate requestId returns existing dispatch", async () => {
-  const first = await relay_dispatch({
-    targetAgentId: "systems-eng",
-    task: "same",
-    requestId: "req-123"
-  });
-  const second = await relay_dispatch({
-    targetAgentId: "systems-eng",
-    task: "same",
-    requestId: "req-123"
-  });
+  const mockTransport = {
+    async postToChannel() {
+      return { messageId: "m-idem" };
+    }
+  };
+
+  const first = await relay_dispatch(
+    {
+      targetAgentId: "systems-eng",
+      task: "same",
+      requestId: "req-123"
+    },
+    { transport: mockTransport }
+  );
+  const second = await relay_dispatch(
+    {
+      targetAgentId: "systems-eng",
+      task: "same",
+      requestId: "req-123"
+    },
+    { transport: mockTransport }
+  );
 
   assert.equal(first.status, "accepted");
   assert.equal(second.status, "accepted");
@@ -87,14 +99,34 @@ test("transport failure marks dispatch failed and does not idempotent-replay", a
   const failedRecord = await loadDispatch(first.dispatchId!);
   assert.equal(failedRecord?.state, "FAILED");
 
-  const second = await relay_dispatch({
-    targetAgentId: "systems-eng",
-    task: "run",
-    requestId: "req-fail-1"
-  });
+  const recoveryTransport = {
+    async postToChannel() {
+      return { messageId: "m-recovery" };
+    }
+  };
+
+  const second = await relay_dispatch(
+    {
+      targetAgentId: "systems-eng",
+      task: "run",
+      requestId: "req-fail-1"
+    },
+    { transport: recoveryTransport }
+  );
 
   assert.equal(second.status, "accepted");
   assert.notEqual(second.dispatchId, first.dispatchId);
+});
+
+test("unconfigured transport fails loudly", async () => {
+  const res = await relay_dispatch({
+    targetAgentId: "systems-eng",
+    task: "no transport configured",
+    requestId: "req-unconfigured"
+  });
+  assert.equal(res.status, "failed");
+  assert.equal(res.code, "RELAY_UNAVAILABLE");
+  assert.ok(res.dispatchId);
 });
 
 test("invalid dispatchId path traversal is rejected", async () => {

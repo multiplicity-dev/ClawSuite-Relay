@@ -19,4 +19,17 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 skeleton started (contract + state + logging + baseline tests).
+Current implementation status: Milestone 1 in progress (contract + state + RelayTransport abstraction + Discord transport adapter scaffold).
+
+## Discord transport wiring (env config)
+To use the real Discord relay transport, configure:
+- `CLAWSUITE_RELAY_BOT_TOKEN` — relay bot token
+- `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
+- `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
+
+Example:
+```bash
+export CLAWSUITE_RELAY_BOT_TOKEN="..."
+export CLAWSUITE_RELAY_CHANNEL_MAP_JSON='{"systems-eng":"1474868861525557308"}'
+export CLAWSUITE_RELAY_MENTION_MAP_JSON='{"systems-eng":"123456789012345678"}'
+```
