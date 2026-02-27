@@ -45,6 +45,28 @@ function resolveRelatedSubagentMessageId(event: any): string | undefined {
   return asString(event?.metadata?.relatedSubagentMessageId) ?? asString(event?.relatedSubagentMessageId);
 }
 
+function resolveAuthorId(event: any): string | undefined {
+  return (
+    asString(event?.metadata?.authorId) ??
+    asString(event?.authorId) ??
+    asString(event?.author?.id)
+  );
+}
+
+function deriveDiscordBotUserIdFromToken(token: string | undefined): string | undefined {
+  if (!token) return undefined;
+  const head = token.split(".")[0];
+  if (!head) return undefined;
+  try {
+    const normalized = head.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    return /^\d+$/.test(decoded) ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveOutboundContent(event: any): string {
   const candidates = [
     asString(event?.content),
@@ -104,6 +126,7 @@ export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
   const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
   const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
+  const relayBotUserId = deriveDiscordBotUserIdFromToken(process.env.CLAWSUITE_RELAY_BOT_TOKEN);
 
   let relayTransport;
   try {
@@ -180,8 +203,11 @@ export default function register(api: PluginApi) {
     const content = asString(event?.content) ?? "";
     if (!channelId || !messageId || !content) return;
 
-    // Ignore relay bot forwarded envelopes to avoid echo loops.
+    // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
+    const authorId = resolveAuthorId(event);
+    if (relayBotUserId && authorId === relayBotUserId) return;
     if (content.includes("[relay_subagent_message_id:")) return;
+    if (content.startsWith("Subagent response received for ")) return;
 
     // Arm dispatch capture when a relay dispatch marker is observed in a mapped subagent channel.
     const markerDispatchId = extractRelayDispatchId(content);

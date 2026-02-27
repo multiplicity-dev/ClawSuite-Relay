@@ -195,6 +195,32 @@ Use this as the canonical chronological log.
 - Rollback note: revert this commit and resume `message_sending`-only outbound strategy.
 
 - Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Live activation revealed partial success plus two new defects.
+- Why: Preserve production-trace facts before next fix iteration.
+- Evidence:
+  - ✅ Core round-trip works (orchestrator dispatch -> subagent reply -> orchestrator receives content).
+  - ❌ Echo/duplication: relay re-ingests forwarded orchestrator-channel messages and re-forwards nested copies.
+  - ❌ Stale queue behavior: older pending dispatches were consumed/forwarded during new tests.
+  - ❌ Scope leak: normal systems-eng assistant text can be captured as relay response when pending dispatch exists (unintended for user-facing guidance replies).
+- Immediate next fixes planned:
+  1) add loop guard to ignore relay bot authored messages and messages containing relay-forward signature in orchestrator channel;
+  2) tighten pending-dispatch selection to newest active dispatch + TTL window;
+  3) require explicit relay-capture scope signal before forwarding generic assistant text.
+- Rollback note: disable plugin if duplication reappears during active user work.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Added stronger echo-loop guard in inbound capture path.
+- Why: Runtime logs showed forwarded envelopes still being re-captured despite signature check.
+- Evidence:
+  - Derive relay bot user id from bot token and ignore `message_received` authored by relay bot.
+  - Added guard for relay-envelope style text prefix (`Subagent response received for ...`).
+  - Existing relay marker/signature guard retained.
+- Risk introduced: Low (narrowly scoped ignore rules).
+- Rollback note: revert guard commit if legitimate non-bot messages are unexpectedly ignored.
+
+- Date/Time: 2026-02-27
 - Author: Claude Code (Opus 4.6)
 - Change: Created `relay_dispatch` tool for OpenClaw plugin API and wired tool registration.
 - Why: Orchestrator agent cannot call `relay_dispatch` without a registered tool — the function existed but was not exposed via the plugin tool system.
