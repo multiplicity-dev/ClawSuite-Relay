@@ -103,3 +103,58 @@ test("capture falls back to marker when no message reference", async () => {
   const updated = await loadDispatch(dispatch.dispatchId!);
   assert.equal(updated?.state, "COMPLETED");
 });
+
+test("forward failure leaves dispatch in SUBAGENT_RESPONDED for retry", async () => {
+  const dispatchTransport = {
+    async postToChannel() {
+      return { messageId: "posted-3" };
+    }
+  };
+
+  const dispatch = await relay_dispatch(
+    { targetAgentId: "systems-eng", task: "do work3", requestId: "capture-fwd-fail-1" },
+    { transport: dispatchTransport }
+  );
+
+  const failingForwardTransport = {
+    async forwardToOrchestrator() {
+      throw new Error("orchestrator channel unavailable");
+    }
+  };
+
+  const failed = await captureSubagentResponse(
+    {
+      channelId: "systems-eng-channel",
+      messageId: "sub-msg-3",
+      referencedMessageId: "posted-3",
+      content: "attempt 1"
+    },
+    { forwardTransport: failingForwardTransport }
+  );
+
+  assert.equal(failed.status, "failed");
+  const mid = await loadDispatch(dispatch.dispatchId!);
+  assert.equal(mid?.state, "SUBAGENT_RESPONDED");
+  assert.equal(mid?.subagentResponseMessageId, "sub-msg-3");
+
+  const recoveryForwardTransport = {
+    async forwardToOrchestrator() {
+      return { messageId: "fwd-3" };
+    }
+  };
+
+  const recovered = await captureSubagentResponse(
+    {
+      channelId: "systems-eng-channel",
+      messageId: "sub-msg-3b",
+      referencedMessageId: "posted-3",
+      content: "attempt 2"
+    },
+    { forwardTransport: recoveryForwardTransport }
+  );
+
+  assert.equal(recovered.status, "processed");
+  const finalState = await loadDispatch(dispatch.dispatchId!);
+  assert.equal(finalState?.state, "COMPLETED");
+  assert.equal(finalState?.forwardedMessageId, "fwd-3");
+});

@@ -107,3 +107,16 @@ Use this as the canonical chronological log.
 - Risk introduced: Medium (forward path depends on correct orchestrator channel config).
 - Rollback note: Revert capture/forward commit to return to dispatch-only flow.
 
+- Date/Time: 2026-02-27
+- Author: systems-eng
+- Change: Added explicit forward-failure retry behavior test for capture flow.
+- Why: Document and lock expected behavior when forwarding fails (`SUBAGENT_RESPONDED` retained, retry by re-capture).
+- Evidence: `test/capture.test.ts` includes failing-forward then recovery-forward sequence with state assertions.
+- Risk introduced: Low (test-only behavior lock-in).
+- Rollback note: Revert test commit if behavior model changes.
+
+- Deferred (explicit from capture audit):
+  - O(n) scan functions (`findDispatchByRequestId`, `findDispatchByPostedMessageId`) remain for v1, revisit with index map in Milestone 2/3.
+  - Marker regex looseness is acceptable due to UUID validation guard in `loadDispatch`; tighten later if noisy.
+  - Test env-var concurrency fragility accepted for now; consider `--test-concurrency=1` or injected config factory in hardening phase.
+
