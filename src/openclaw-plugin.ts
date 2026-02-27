@@ -245,6 +245,13 @@ export default function register(api: PluginApi) {
     if (!relayEnabled) return;
 
     const targetAgentId = asString(ctx?.agentId);
+
+    if (debugOutbound) {
+      api.logger.info?.(
+        `clawsuite-relay: before_message_write debug targetAgentId=${targetAgentId ?? "<none>"} ctx=${JSON.stringify({ agentId: ctx?.agentId, sessionKey: ctx?.sessionKey })} event=${previewEventShape(event)}`
+      );
+    }
+
     if (!targetAgentId) return;
     if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
 
@@ -255,6 +262,11 @@ export default function register(api: PluginApi) {
     if (!content) return;
 
     const armedDispatchId = getArmedDispatchId(targetAgentId);
+    if (debugOutbound) {
+      api.logger.info?.(
+        `clawsuite-relay: before_message_write armed targetAgentId=${targetAgentId} armedDispatchId=${armedDispatchId ?? "<none>"} content_len=${content.length}`
+      );
+    }
     if (!armedDispatchId) return;
 
     try {

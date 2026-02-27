@@ -240,6 +240,16 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Added temporary `before_message_write` context instrumentation.
+- Why: Dispatch still intermittently stalls at `POSTED_TO_CHANNEL`; need definitive runtime evidence for why outbound capture gate is skipped.
+- Evidence:
+  - Debug logs now emit `ctx.agentId`, `ctx.sessionKey`, event shape, armed dispatch id, and content length.
+  - Controlled by existing `CLAWSUITE_RELAY_DEBUG_OUTBOUND=1` flag.
+- Risk introduced: Low (debug-only verbosity).
+- Rollback note: remove debug logs once root cause is confirmed.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:
