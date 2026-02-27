@@ -3,15 +3,16 @@
 Status: Draft
 
 ## Milestone 0 — Design Freeze
-- [ ] Approve TDD
-- [ ] Approve failure semantics
-- [ ] Approve v1 scope
+- [x] Approve TDD
+- [x] Approve failure semantics
+- [x] Approve v1 scope
 
 ## Milestone 1 — Single-Subagent Relay (CTO only)
+- [x] Relay dispatch contract + validation skeleton (`relay_dispatch`) with deterministic status codes
 - [ ] Relay post to target channel
 - [ ] Subagent response capture
 - [ ] Forward to orchestrator
-- [ ] Basic correlation IDs
+- [x] Basic correlation IDs (`dispatchId` lifecycle)
 - [ ] Suppress redundant transient subagent completion announce in #general when relay mode is active
 
 Acceptance:
@@ -43,4 +44,3 @@ Acceptance:
 - [ ] updated runbook
 - [ ] test evidence
 - [ ] rollback guide
-%%see comments in relay-bot-plan for additional items to consider%%

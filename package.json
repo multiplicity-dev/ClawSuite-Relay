@@ -1,0 +1,17 @@
+{
+  "name": "clawsuite-relay",
+  "version": "0.1.0",
+  "description": "Relay bridge for OpenClaw orchestrator to subagent channels",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

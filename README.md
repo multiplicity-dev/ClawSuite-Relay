@@ -11,5 +11,12 @@ Routes orchestrator delegation into subagent channels for transparent prompt/res
 - `dev-log.md` — chronological decisions/evidence
 - `test-validation-plan.md` — validation checklist and evidence format
 
-## Rule
-No coding until technical design decisions are explicitly approved.
+## Development
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+Current implementation status: Milestone 1 skeleton started (contract + state + logging + baseline tests).
