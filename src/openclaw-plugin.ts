@@ -203,12 +203,6 @@ export default function register(api: PluginApi) {
     const content = asString(event?.content) ?? "";
     if (!channelId || !messageId || !content) return;
 
-    // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
-    const authorId = resolveAuthorId(event);
-    if (relayBotUserId && authorId === relayBotUserId) return;
-    if (content.includes("[relay_subagent_message_id:")) return;
-    if (content.startsWith("Subagent response received for ")) return;
-
     // Arm dispatch capture when a relay dispatch marker is observed in a mapped subagent channel.
     const markerDispatchId = extractRelayDispatchId(content);
     if (markerDispatchId && reverseChannelMap[channelId]) {
@@ -217,6 +211,12 @@ export default function register(api: PluginApi) {
         armDispatch(markerDispatch.targetAgentId, markerDispatch.dispatchId);
       }
     }
+
+    // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
+    const authorId = resolveAuthorId(event);
+    if (relayBotUserId && authorId === relayBotUserId) return;
+    if (content.includes("[relay_subagent_message_id:")) return;
+    if (content.startsWith("Subagent response received for ")) return;
 
     try {
       const result = await captureSubagentResponse(

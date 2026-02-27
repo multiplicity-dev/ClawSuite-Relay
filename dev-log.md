@@ -230,6 +230,16 @@ Use this as the canonical chronological log.
 
 - Date/Time: 2026-02-27
 - Author: systems-eng
+- Change: Fixed arming regression introduced by inbound bot-ignore ordering.
+- Why: Last patch blocked relay-bot dispatch markers before arming, leaving dispatches stuck in `POSTED_TO_CHANNEL`.
+- Evidence:
+  - Reordered `message_received` flow: marker-based arming runs before bot/envelope ignore guards.
+  - Preserves anti-echo filters while restoring arm-and-capture path.
+- Risk introduced: Low.
+- Rollback note: revert ordering commit if unexpected re-capture behavior returns.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng
 - Change: Milestone 1 live validation completed successfully.
 - Why: Confirm production-like relay loop is stable before moving to next phase.
 - Evidence:
