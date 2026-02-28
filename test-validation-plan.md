@@ -10,9 +10,9 @@
 
 - [x] orchestrator dispatch reaches subagent channel
   - **PASS** — Confirmed multiple times. Relay bot posts to #tech with dispatch marker and @mention. Evidence: dispatchIds `8afe4945`, `c918869d`, `537a94a5`, `443682d6`, `2a8c4f00`, others.
-- [x] Subagent reply is forwarded to orchestrator
-  - **PASS** — `agent_end` hook with `extractCurrentTurnContent` captures tool results + assistant text from current turn and forwards to orchestrator channel. CEO confirmed tool outputs (hostname) visible in forward but not in subagent channel. Evidence: dispatchId `443682d6` (content_len=51), `2a8c4f00` (content_len=21).
-  - **CAVEAT**: Forward payloads >2000 chars fail (Discord limit). Needs message splitting. Only trivial/short responses forward successfully.
+- [ ] Subagent's last assistant message is forwarded to orchestrator
+  - **PENDING RETEST** — Switching capture from `agent_end` (inconsistent) to `llm_output` hook. Relay should forward `assistantTexts[assistantTexts.length - 1]` (last entry), matching what the completion announce delivers in normal `sessions_spawn` workflows. Previous `agent_end`-based capture produced inconsistent results across multiple attempts. `llm_output` provides the data pre-extracted.
+  - **CAVEAT**: Forward payloads >2000 chars fail (Discord limit). Needs message splitting.
 - [ ] orchestrator synthesis path remains intact
   - **NOT TESTED** — No test has verified that CEO correctly synthesizes from the forwarded relay content in a real orchestration flow.
 - [ ] Relay outage surfaces explicit error (no silent fallback)

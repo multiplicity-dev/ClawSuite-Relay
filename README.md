@@ -54,17 +54,18 @@ Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 
 ## OpenClaw runtime hook wiring
 This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.json`) that wires:
+- `llm_output` → **primary capture path**: provides `assistantTexts: string[]` pre-extracted. Relay forwards the last entry (`assistantTexts[assistantTexts.length - 1]`), matching what the completion announce delivers in normal `sessions_spawn` workflows
 - `message_received` → subagent response capture (fallback path for external bot messages)
-- `message_sending` → outbound capture for subagent channels + announce suppression in orchestrator channel
-- `agent_end` → **primary capture path**: extracts full current-turn content (tool results + assistant text) from the agent's session messages array
+- `message_sending` → announce suppression in orchestrator channel
 - `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
 
-**Key findings from live testing:**
+**Key findings from live testing and source analysis:**
+- `llm_output` fires for embedded agent sessions (confirmed in `pi-embedded-NV2C9XdE.js`). Fires AFTER `agent_end`.
+- OpenClaw deliberately limits the completion announce to the last assistant message — the orchestrator's context budget must stay clean for cross-agent synthesis. The relay matches this by forwarding only the last `assistantTexts` entry.
 - `message_sending` does NOT fire for embedded agent responses.
 - `before_message_write` only captures Discord-visible text (truncated), not full response.
-- `agent_end` provides the full session history — extraction must scope to current turn only.
-- OpenClaw uses `role: "toolResult"` (not `"tool"`) and message content can be arrays (not just strings).
 - Plugin is re-initialized per agent session — in-memory state does not survive. Arming uses disk persistence.
+- See `layer-disambiguation.md` for the four-surface analysis of OpenClaw's subagent output.
 
 Typical local load path:
 ```bash

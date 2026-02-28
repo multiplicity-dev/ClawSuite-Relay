@@ -37,13 +37,18 @@ When the president (human user) asks orchestrator (openclaw orchestrator) to del
 - **President can't audit** the subagent's actual work without digging into JSONL files
 - **Errors propagate silently** — if orchestrator's summary is wrong, neither president nor subagent catches it because neither sees the raw exchange
 
-### 1.3 Three layers of information richness
+### 1.3 Information layers and the relay's target
 
-1. **Raw JSONL** — everything: tool calls, intermediate steps, thinking blocks, assistant text. Only accessible via file read or `sessions_history`.
-2. **Assistant text** — what the agent "says" in response. A fraction of the JSONL. This is what appears in chat and what gets forwarded in completion announces.
-3. **orchestrator synthesis** — orchestrator's integrated response in #general, working off the assistant text it received. May involve multiple subagents.
+OpenClaw exposes subagent output through four distinct surfaces (see `layer-disambiguation.md` for full analysis):
 
-Today the president only sees layer 3. The relay bot makes layer 2 visible in subagent channels.
+1. **Raw JSONL** (Surface 4) — everything: tool calls, intermediate steps, thinking blocks, assistant text. File on disk or via `sessions_history` with `includeTools: true`.
+2. **`sessions_history`** (Surface 3) — filtered transcript the parent agent can query on-demand. Truncated, capped at 80KB. The CEO calls this when it needs deeper context.
+3. **Last assistant message** (Surface 2) — the subagent's final answer. This is what the completion announce delivers to the parent agent as its `Result:` field. OpenClaw deliberately limits to the last message because the orchestrator's context budget is finite — it must synthesize across multiple subagents without absorbing every intermediate thought from each one.
+4. **`assistantTexts` array** (Surface 1) — all model-produced text across the run (intermediate + final). Available via `llm_output` hook. Used internally for channel delivery.
+
+**The relay targets Surface 2** — the last assistant message, matching the completion announce. The orchestrator receives concise results it can synthesize across agents, not raw transcripts or intermediate reasoning.
+
+Today the president only sees orchestrator's synthesis (Layer 3). The relay bot makes Surface 2 content visible in subagent channels and routes it back to the orchestrator.
 
 ### 1.4 Why this matters beyond debugging
 
@@ -99,7 +104,7 @@ From the orchestrator's perspective: "I compose prompts, they get posted to chan
 ### 3.1 Components
 
 1. **Relay bot** — a second Discord bot (separate token from OpenClaw's bot) that posts messages to subagent channels
-2. **OpenClaw plugin** — handles the `message_sent` hook to forward subagent responses back to orchestrator
+2. **OpenClaw plugin** — handles the `llm_output` hook to capture the subagent's last assistant message and forward it back to orchestrator
 3. **OpenClaw config changes** — `allowBots=true`, mention gating, channel mappings
 
 ### 3.2 Message flow
@@ -115,9 +120,9 @@ President → #general → orchestrator processes → orchestrator composes task
                                             ↓
                                     CTO responds in #it (normal channel response)
                                             ↓
-                                    message_sent hook fires on CTO's response
+                                    llm_output hook fires with assistantTexts[]
                                             ↓
-                                    Plugin forwards assistant text to orchestrator
+                                    Plugin forwards last assistant message to orchestrator
                                     (via sessions_send or enqueueSystemEvent)
                                             ↓
                                     orchestrator synthesizes in #general
@@ -141,7 +146,7 @@ A second bot token bypasses this filter. With `allowBots=true`, the relay bot's 
 - Relay bot messages include an @mention of the subagent → subagent processes and responds
 - Messages posted by the OpenClaw bot itself (e.g., orchestrator posting to a different channel) would be dropped by the self-filter anyway
 - The relay bot ONLY posts orchestrator's prompts — it never posts anything that would trigger a second response
-- The subagent responds once → `message_sent` hook fires → plugin forwards to orchestrator → orchestrator responds in #general (a different channel — no loop)
+- The subagent responds once → `llm_output` hook fires → plugin forwards last assistant message to orchestrator → orchestrator responds in #general (a different channel — no loop)
 
 ### 3.5 How orchestrator receives the response
 
@@ -154,15 +159,15 @@ The plugin forwards subagent responses to orchestrator via `sessions_send`, whic
 **Response framing:** The forwarded message to orchestrator must include structured context — not just raw response text. At minimum:
 - **subagent identity** — which agent produced this response
 - **Correlation ID** — which dispatch batch this belongs to (for multi-subagent flows)
-- **Response text** — the subagent's full assistant text
+- **Response text** — the subagent's last assistant message text
 
-Without this framing, orchestrator must infer attribution, which is error-prone when multiple subagents respond to related prompts. The exact format is a Track A implementation decision, but the requirement is fixed: orchestrator must receive enough metadata to synthesize without guessing. The goal is for orchestrator to receive the subagent's actual assistant text — richer than the short summaries printed to Discord today, without drowning orchestrator in raw JSONL.
+Without this framing, orchestrator must infer attribution, which is error-prone when multiple subagents respond to related prompts. The exact format is a Track A implementation decision, but the requirement is fixed: orchestrator must receive enough metadata to synthesize without guessing. The goal is for orchestrator to receive the subagent's last assistant message — matching what the completion announce delivers in normal `sessions_spawn` flows, without drowning orchestrator in intermediate reasoning or raw JSONL. The orchestrator can always call `sessions_history` on-demand for deeper context on a specific subagent.
 
 ### 3.6 Parallel dispatch coordination
 
 When orchestrator sends to multiple subagents simultaneously, it needs to wait for all responses before synthesizing.
 
-**Scripted batching (primary approach):** Each relay dispatch carries a correlation ID (e.g., `dispatch-2026-02-26-001`). The `message_sent` hook on each subagent writes the response + correlation ID to shared state. A batching component tracks expected vs received responses per correlation ID. When all expected responses arrive, it triggers orchestrator (via `sessions_send`) with the complete batch. orchestrator synthesizes once, not per-response.
+**Scripted batching (primary approach):** Each relay dispatch carries a correlation ID (e.g., `dispatch-2026-02-26-001`). The `llm_output` hook on each subagent writes the last assistant message + correlation ID to shared state. A batching component tracks expected vs received responses per correlation ID. When all expected responses arrive, it triggers orchestrator (via `sessions_send`) with the complete batch. orchestrator synthesizes once, not per-response.
 
 This is the primary approach — not merely preferred — because:
 - **Deterministic** — no reliance on orchestrator correctly managing a checklist (which requires token burn and enforcement of its own)
@@ -177,22 +182,20 @@ This is the primary approach — not merely preferred — because:
 
 ### 3.7 Discord message length and multi-message responses
 
-Discord's 2000-character limit applies to subagent channel responses. If a subagent's response exceeds this, the delivery layer splits it across multiple Discord messages. Each split triggers `message_sent` separately.
+Discord's 2000-character limit applies to channel delivery. If the last assistant message exceeds 2000 chars, the relay's forward to the orchestrator channel needs message splitting.
 
-**How the plugin knows all parts arrived:** The subagent's agent turn produces one logical response, which OpenClaw may split into multiple Discord sends. The plugin needs to distinguish "subagent sent 3 messages as one response" from "subagent sent 3 separate responses to 3 different prompts."
-
-**V1 decision:** Buffer messages per subagent per correlation ID with a short debounce window (e.g., 5 seconds of no new messages from that subagent = response complete). This is consistent with the scripted-batching philosophy in 3.6 — the plugin handles reassembly, not orchestrator. CTO should also investigate OpenClaw's internal message sequencing during implementation, which may provide a cleaner signal than time-based debounce.
+**Note on `llm_output` vs channel splitting:** The `llm_output` hook provides the last assistant message as a single string (not pre-split for Discord). Splitting is only needed for the relay's Discord forward, not for extracting the content. This is simpler than the previous `message_sent`-based approach where the plugin had to reassemble multi-message channel splits.
 
 ### 3.8 What orchestrator receives vs today
 
 | | Today (sessions_spawn) | Relay bot |
 |---|---|---|
-| orchestrator gets | `buildCompletionDeliveryMessage`: status line + final assistant text | `message_sent` hook content: actual chat-visible text |
-| Intermediate steps | Not included | Not included |
-| Raw JSONL | Accessible via `sessions_history` | Not applicable (work in main session, not JSONL) |
+| orchestrator gets | Completion announce: status line + last assistant message text | `llm_output` hook: last entry of `assistantTexts` (same content) |
+| Intermediate steps | Not included (deliberate — preserves orchestrator context budget) | Not included |
+| Full transcript | Accessible via `sessions_history` on-demand | Work happens in main session; accessible via `sessions_history` on-demand |
 | Richness | Equivalent | Equivalent |
 
-The relay bot does NOT change what orchestrator works off of for synthesis. It changes WHERE the work happens (main session vs transient) and WHO can see it (everyone in channel vs nobody).
+The relay bot delivers the same content the orchestrator would receive from a completion announce — the subagent's last assistant message. It does NOT change what orchestrator works off of for synthesis. It changes WHERE the work happens (main session vs transient) and WHO can see it (everyone in channel vs nobody). The orchestrator can call `sessions_history` on either path if it needs deeper context.
 
 ### 3.9 Concurrent session access
 
@@ -246,7 +249,8 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 - Bot self-message filter: hard-coded, not configurable (`dist/pi-embedded-BDhvoWGL.js` ~47905)
 - `allowBots=true`: enables other bot messages, does NOT bypass self-filter (`docs/channels/discord.md`)
 - `requireMention` + "store for context only": messages that fail mention gate are stored as pending history, not processed (`docs/channels/groups.md`, code ~48246-48260)
-- `message_sent` hook: has full outgoing text in `content` field (`dist/plugin-sdk/plugins/types.d.ts`, `dist/deliver-EAUi55EQ.js` ~1158+)
+- `message_sent` hook: has full outgoing text in `content` field (`dist/plugin-sdk/plugins/types.d.ts`, `dist/deliver-EAUi55EQ.js` ~1158+). **Not used for relay capture** — `llm_output` provides pre-extracted `assistantTexts[]` which is more reliable. See `layer-disambiguation.md`.
+- `llm_output` hook: fires after `agent_end`, provides `assistantTexts: string[]` (all model text across the run) + `lastAssistant` (last assistant message object). Shipped in v2026.2.15. Fires for embedded agent sessions (`dist/pi-embedded-NV2C9XdE.js` line 79339).
 - `enqueueSystemEvent`: max 20 per session, in-memory only, drained once into next prompt, lost on gateway restart (`dist/pi-embedded-BDhvoWGL.js` ~14333-14379)
 - `chat.inject`: appends assistant-only note without triggering run — cannot inject user messages (`dist/client-Bri_7bSd.js` ~1677-1681)
 - `sessions_send timeout=0`: fire-and-forget but still triggers a run in target session
@@ -266,7 +270,7 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 **Components:**
 1. Discord bot application (Discord Developer Portal — free)
 2. Relay bot script (Node.js or Python, ~100-200 lines): connects to Discord, listens for relay commands from orchestrator (via file, API, or inter-process mechanism), posts to target channels with subagent mention
-3. OpenClaw plugin (`~/.openclaw/extensions/relay-bridge/`): `message_sent` hook that forwards subagent responses to orchestrator's session
+3. OpenClaw plugin (`~/.openclaw/extensions/relay-bridge/`): `llm_output` hook that captures the subagent's last assistant message and forwards it to orchestrator's session
 4. Config changes: `allowBots=true`, channel-to-agent mappings, mention patterns
 
 **Estimated effort:** 12-24h
@@ -282,7 +286,7 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 
 **Validation criteria:**
 - [x] orchestrator composes prompt → appears in subagent channel (via relay bot) — **VERIFIED LIVE**
-- [x] subagent responds in channel → orchestrator receives response (via hook) — **VERIFIED LIVE** (tool results + assistant text via `agent_end`). Caveat: >2000 char payloads fail.
+- [ ] subagent responds in channel → orchestrator receives last assistant message (via `llm_output` hook) — **PENDING RETEST** (switching from `agent_end` to `llm_output`). Caveat: >2000 char payloads fail.
 - [ ] subagent remembers the work in subsequent direct conversations — **NOT TESTED**
 - [x] President can see both prompt and response in subagent channel — **VERIFIED LIVE**
 - [x] No loops or cascading responses — **VERIFIED LIVE** (echo prevention via relay bot user ID filter + envelope guards)

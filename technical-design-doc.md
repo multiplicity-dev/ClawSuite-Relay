@@ -7,7 +7,7 @@ Status: Milestone 1 IN PROGRESS — core relay loop works, blockers remain (see 
   - Single-subagent relay for `systems-eng` only (CTO lane)
   - `relay_dispatch` contract + deterministic status codes
   - Relay bot posts orchestrator prompt into mapped subagent channel with mention
-  - Hook captures subagent response and forwards structured payload to orchestrator
+  - `llm_output` hook captures subagent's last assistant message and forwards structured payload to orchestrator (matching completion announce content)
   - Fail-loud behavior (no silent fallback)
   - Basic correlation IDs and audit logging
   - Suppress redundant transient subagent completion announce in `#general` when relay mode is active
@@ -109,7 +109,7 @@ Persistence:
 
 - functional:
   - [x] orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot — **VERIFIED LIVE**
-  - [x] subagent response is captured and forwarded back to orchestrator with dispatchId — **VERIFIED LIVE** (tool outputs + assistant text via `agent_end`). Caveat: >2000 char payloads fail (Discord limit, needs message splitting).
+  - [ ] subagent's last assistant message is captured via `llm_output` hook and forwarded to orchestrator with dispatchId — **IMPLEMENTATION PENDING** (switching from `agent_end` to `llm_output`; forwards `assistantTexts[last]` to match completion announce). Caveat: >2000 char payloads fail (Discord limit, needs message splitting).
 - reliability:
   - [ ] transient relay API errors recover within retry budget — **NOT IMPLEMENTED** (no retry logic in v1)
   - [ ] timeout paths produce explicit `FAILED` state + operator notice — **NOT IMPLEMENTED** (no timeout tracking in v1)

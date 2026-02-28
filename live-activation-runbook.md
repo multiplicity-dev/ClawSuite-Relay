@@ -10,8 +10,8 @@ Round trip confirmed at `a09c21e` (branch `top-down-cleanup`): orchestrator disp
 
 ## PHASE 1 BLOCKERS (must resolve before milestone closure)
 
-**Blocker 1 (PRIMARY) — Orchestrator receives only channel-visible text, not full assistant text.**
-This is the reason for the handoff. `extractCurrentTurnContent` exists in `agent_end` and captures tool results (`role: "toolResult"`) + assistant messages from the current turn. It worked ONCE for a trivial test (CEO saw hostname from tool output). But in real-world tests with complex prompts, the orchestrator still only receives what the CTO posted to the Discord channel — not the full assistant-layer content (tool outputs, reasoning, intermediate text). GPT reportedly achieved this capability (with echo issues). The mechanism is in place but does NOT consistently deliver assistant text. See dev-log.md Changes 2-7 for the full history of what was tried.
+**Blocker 1 (PRIMARY) — Switch capture to `llm_output` hook targeting last assistant message.**
+Previous capture hooks (`agent_end` + message parsing, `before_message_write`) produced inconsistent results. The `llm_output` hook provides `assistantTexts: string[]` pre-extracted. The relay should forward only `assistantTexts[assistantTexts.length - 1]` — matching what the completion announce delivers in normal `sessions_spawn` workflows. OpenClaw deliberately limits to the last assistant message because the orchestrator's context budget must remain clean for cross-agent synthesis. See `layer-disambiguation.md` for the four-surface analysis.
 
 **Blocker 2 — Relay envelope visible in orchestrator channel.**
 The relay bot's forwarded message is visible to the human in #general. This is not just cosmetic — it's operational noise. Auto-delete was attempted by GPT but deleted the wrong message (CEO's prompt to #tech instead of the envelope), which cascaded into losing the loop. Approach: auto-delete of the relay bot's OWN forwarded message in the orchestrator channel (not any other message). Must be careful with target selection.
@@ -32,8 +32,8 @@ Unit tests pass (30/30) but the live validation matrix in `test-validation-plan.
 **Issue 1 — RESOLVED: duplicate forward.**
 Two hooks (`before_message_write` and `agent_end`) both fired for the same response within 121ms. Fix: use only one capture hook. Tested with `agent_end` removed — single forward confirmed (dispatchId `537a94a5`).
 
-**Issue 2 — NOT RESOLVED: assistant text capture.**
-`agent_end` with `extractCurrentTurnContent` captures tool results (`role: "toolResult"`) + assistant messages from current turn. Worked once for a trivial test (hostname). But real-world tests still only deliver channel-visible text to orchestrator. `extractLastAssistantText` also tested and confirmed insufficient — returns only channel text. **This is the primary Phase 1 blocker and the reason for the handoff.**
+**Issue 2 — RESOLUTION IDENTIFIED: switch to `llm_output` hook.**
+`agent_end` and `before_message_write` produced inconsistent results across multiple attempts. The `llm_output` hook provides `assistantTexts: string[]` pre-extracted. Relay should forward `assistantTexts[assistantTexts.length - 1]` (last entry = last assistant message), matching the completion announce. See `layer-disambiguation.md` for full analysis. **Implementation pending.**
 
 ### Key architectural findings from troubleshooting
 

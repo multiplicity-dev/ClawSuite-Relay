@@ -492,3 +492,763 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
 7. `message_sent` registration corrupts hook runner — do not use.
 8. CEO session bloat at ~12MB causes same unresponsive pattern as CTO at 11.7MB (model-independent).
 
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Pinned known-good baseline before new regression work.
+- Why: Enforce clean rollback discipline during assistant-text capture debugging.
+- Evidence:
+  - Branch: `top-down-cleanup`
+  - Baseline commit: `ee68a09`
+  - Created/updated tag: `baseline-pre-regression-fix-ee68a09` -> `ee68a09`
+- Risk introduced: None.
+- Rollback note: `git checkout baseline-pre-regression-fix-ee68a09` (or reset branch to `ee68a09`) restores this baseline exactly.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Ran full local automated test suite from baseline.
+- Why: Verify no hidden local regressions before live CEO/CTO relay validation.
+- Evidence:
+  - Command: `npm test --silent`
+  - Result: 30/30 passing, 0 failing, duration ~879ms
+- Risk introduced: None (read-only validation).
+- Rollback note: No code changes made in this step.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded live queued relay-envelope observations in #tech during baseline validation window.
+- Why: Preserve evidence relevant to echo/suppression behavior and sender-identity handling.
+- Evidence:
+  - Queued message from relay bot (`1476809589591773295`):
+    - `Subagent response received for systems-eng. done [relay_dispatch_id:3d86cfd9-3f75-46dd-a794-1e2cdce8b7d5] [relay_subagent_message_id:sub-plugin-1]`
+  - Queued message from relay bot (`1476809589591773295`):
+    - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+  - Both arrived in #tech while this agent was busy.
+- Risk introduced: None (documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded live CEO arithmetic probe outcome for layer-classification + leak check.
+- Why: Re-establish factual baseline before additional fixes.
+- Evidence:
+  - Relay prompt in #tech: `<@794579141801934879> How many two-digit numbers have digits that sum to 9? Reply with only the number. [relay_dispatch_id:e0ab6af6-0aae-4d26-9e72-d6c173e7232a]`
+  - CTO channel-visible response: `9`
+  - CEO-observed #general sequence:
+    1) `Dispatched. dispatchId=e0ab6af6.`
+    2) Relay envelope leak: `Subagent response received for systems-eng. [[reply_to_current]] 9 [relay_dispatch_id:...] [relay_subagent_message_id:1476956996472406117]`
+    3) Orchestrator synthesis: `Only 9. Layer 3.`
+  - Classification: forwarded payload matched channel-visible output (`9`), not richer assistant-layer content.
+  - Leak behavior: single relay-envelope leak observed in orchestrator channel; no echo cascade in this run.
+- Risk introduced: None (documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Implemented Package A step — removed `message_sending` outbound-capture fallback so relay forwarding uses `agent_end` as the canonical capture source.
+- Why: Prevent silent downgrade to channel-visible-only forwarding path and reduce cross-hook ambiguity while debugging assistant-layer capture regression.
+- Evidence:
+  - `src/openclaw-plugin.ts`
+    - Removed `captureOutboundResponse` import and outbound-capture block from `message_sending` hook.
+    - Kept `message_sending` only for transient-announce suppression.
+    - Simplified channel mapping bootstrap/logging (no reverse map).
+  - Validation: `npm test --silent` => 30/30 passing.
+- Risk introduced: Medium-low (if `agent_end` fails to fire in a runtime edge-case, there is no outbound-capture fallback).
+- Rollback note: `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts` restores prior mixed-capture behavior.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded additional live relay-envelope leak after Package A code edit (pre-restart).
+- Why: Preserve evidence that currently running gateway instance still emits forwarded envelope leaks before new plugin code is activated.
+- Evidence:
+  - Queued relay-bot message in #tech: `Subagent response received for systems-eng. done [relay_dispatch_id:bfffa6ea-8187-4c5a-8539-ce77406bf662] [relay_subagent_message_id:sub-plugin-1]`
+  - Sender: relay bot user id `1476809589591773295`.
+- Risk introduced: None (documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added operator-confirmed behavioral conclusion about relay-envelope leaks.
+- Why: Capture the now-consistent pattern to avoid misdiagnosing leak occurrence as intermittent.
+- Evidence / Conclusion:
+  - Leak appears consistently when a subagent dispatch/forward occurs (approximately one relay envelope per subagent response).
+  - No leak appears on turns without subagent dispatch, which explains earlier "clean" exchanges.
+  - This likely explains prior observed "double" leakage during multi-response scenarios (or duplicated forward paths).
+  - Pattern aligns with CEO channel observations and CTO-side queued relay-envelope messages.
+- Risk introduced: None (documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded live regression after removing `message_sending` outbound-capture fallback (Package A step).
+- Why: Prevent repeat investigation of known-failing stone.
+- Evidence:
+  - Dispatch prompt in #tech: `relay_dispatch_id:86e6ca0a-e110-4a71-961e-845411b42296`
+  - CTO channel response: `4`
+  - Operator report: CEO/orchestrator did **not** receive forwarded subagent response.
+  - Environment context: gateway was restarted before this test, so new plugin code was active.
+- Conclusion:
+  - `agent_end`-only capture path is not reliably forwarding in current runtime.
+  - Removing `message_sending` fallback reproduces known failure mode previously observed by Claude Code.
+  - This package should be treated as failed and not retried without new evidence.
+- Risk introduced: High functional regression (relay return path lost).
+- Rollback note:
+  - Restore prior mixed capture baseline from tag `baseline-pre-regression-fix-ee68a09` (or reintroduce outbound capture path from that commit).
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Rolled back failed Package A edit by restoring `src/openclaw-plugin.ts` from baseline tag.
+- Why: `agent_end`-only capture regression prevented CEO from receiving subagent replies (dispatch `86e6ca0a...`).
+- Evidence:
+  - Command: `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+  - Validation: `npm test --silent` => 30/30 passing.
+  - Working tree now only includes expected doc-log modifications (`dev-log.md`).
+- Risk introduced: Low (returns code to known baseline behavior).
+- Rollback note: Baseline already restored; no further action needed to return from this failed experiment.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded additional queued relay-envelope leak evidence after rollback prep.
+- Why: Keep leak chronology complete while waiting for runtime restart/activation.
+- Evidence:
+  - Relay message: `Subagent response received for systems-eng. done [relay_dispatch_id:ae72b52e-3d16-4d06-b67d-fa3f4d785d75] [relay_subagent_message_id:sub-plugin-1]`
+  - Relay message: `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None (documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Implemented next capture package on top of baseline to prioritize assistant-layer capture while keeping fallback path available.
+- Why: Baseline forwards reliably but tends to send channel-visible output; previous `agent_end`-only attempt dropped replies. This package keeps reliability while reducing silent channel-text downgrade.
+- Code changes (`src/openclaw-plugin.ts`):
+  1) Added `resolveTargetAgentFromAgentEnd(event, ctx, channelMap)`:
+     - Uses `ctx.agentId` when present.
+     - Falls back to channel-id mapping when `ctx.agentId` is missing.
+     - Goal: make `agent_end` capture resilient to runtime context shape differences.
+  2) Updated `agent_end` to use `resolveTargetAgentFromAgentEnd(...)` instead of only `ctx.agentId`.
+  3) Modified `message_sending` outbound-capture behavior:
+     - If an armed dispatch exists for the mapped target agent, skip outbound capture and wait for `agent_end`.
+     - If no armed dispatch exists, keep existing outbound fallback behavior.
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Medium (if `agent_end` still fails for armed dispatches, forwarding may stall because outbound fallback now defers during armed window).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+  - Then restart gateway to reactivate baseline behavior.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples while waiting for runtime activation of latest package.
+- Why: Preserve sequence continuity; these messages are from pre-activation runtime behavior.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:ae05137f-d48c-4330-b0f3-a81b3926dafd] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded live result for package (agent_end target fallback + armed gating in message_sending).
+- Why: Determine whether package improves assistant-layer forwarding and/or leak behavior.
+- Evidence:
+  - Dispatch: `10130799-0f18-478a-9255-cc37581e3734`
+  - CTO channel response: `504`
+  - CEO channel observed:
+    1) relay envelope leak with forwarded payload `[[reply_to_current]] 504`
+    2) orchestrator output `Dispatched. dispatchId=10130799. Only 504. No reasoning. Layer 3.`
+- Classification:
+  - Delivery: PASS (orchestrator received forwarded content)
+  - Content layer: FAIL (forwarded content still channel-visible output; no assistant-layer enrichment)
+  - Leak/echo: PARTIAL FAIL (single leak persists; no duplicate echo in this run)
+- Conclusion:
+  - Latest package did not solve primary blocker (assistant-layer capture) and did not remove relay-envelope leak.
+  - It retained baseline-style behavior with reliable delivery + single leak + Layer 3 forwarding.
+- Risk introduced: Medium (code complexity increased without solving target issue).
+- Rollback note:
+  - Current package can be rolled back via baseline tag restore if desired: `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added targeted runtime diagnostics to identify actual forwarding hook source per dispatch.
+- Why: Stop guesswork; determine whether forwards come from `agent_end`, `message_sending`, or `message_received` in live runs.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `resolveTargetAgentFromAgentEnd(...)` (ctx.agentId + channel-map fallback) and diagnostic logs.
+  - `agent_end` now logs:
+    - skip reason when no armed dispatch (`armed=none`)
+    - candidate extraction info (`dispatch`, `target`, `content_len`, trailing role summary)
+  - Forward-source logs now explicitly emit:
+    - `diag forward source=agent_end dispatch=... content_len=...`
+    - `diag forward source=message_sending dispatch=... content_len=...`
+    - `diag forward source=message_received dispatch=...`
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Low (diagnostic logging only + non-breaking target resolution fallback already planned).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples prior to diagnostic activation.
+- Why: Maintain complete leak timeline and avoid losing evidence while agent was busy.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:ea4b1f69-f0ba-4e68-851d-2ca99fe64c04] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Correlated diagnostic logs for dispatch `330eb975-3e22-4cc4-b3b4-7f5c9714697f` to identify actual forward source.
+- Why: Verify forwarding path with hard evidence (no inference).
+- Evidence (gateway journal):
+  - `dispatch.created` and `dispatch.posted` for `330eb975...`
+  - `diag agent_end candidate dispatch=330eb975... content_len=24 roles_tail=[assistant,toolResult,assistant,toolResult,assistant,user,assistant,toolResult,assistant,assistant,user,assistant]`
+  - `dispatch.forwarded_outbound` for same dispatch
+  - `diag forward source=agent_end dispatch=330eb975... content_len=24`
+- Conclusion:
+  - Forward for this test came from `agent_end` (not `message_sending` or `message_received`).
+  - Payload length (24) matches channel-level terse output pattern (`[[reply_to_current]] 125`), so no assistant-layer enrichment occurred in this prompt shape.
+  - Primary blocker is now narrowed to extraction/content-selection semantics, not hook-source ambiguity.
+- Risk introduced: None (diagnostic interpretation + documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged interpretation of multi-probe CEO channel evidence from `/home/dave/Documents/Notes/it/links/ClawSuite-Relay/ceo channel.md`.
+- Why: Consolidate nuanced read of mixed outputs (tool-result leakage vs assistant-text enrichment) and avoid over-claiming success.
+- Evidence summary:
+  - `bd9014f2...` (hostname/date+OK): relay envelope included tool outputs (`montblanc`, epoch) + `OK`.
+  - `8bcb1688...` (squares): relay envelope only `12`.
+  - `1ff0a677...` (web_search error): relay envelope included web_search error blob + `385000`.
+  - `454ffbd1...` (mcporter/exec tavily): relay envelope only `395181`.
+- Interpretation:
+  - Not clean Layer-2 assistant-text forwarding.
+  - Observed behavior is mixed and path-dependent: sometimes tool-result artifacts leak into forwarded payload, but often forwarded payload is only channel-visible terse answer.
+  - Current evidence supports "inconsistent mixed capture" rather than stable assistant-layer relay.
+- Risk introduced: None (analysis/documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Implemented deterministic tool-result extraction upgrade for `agent_end` turn-content assembly.
+- Why: Diagnostic evidence showed `agent_end` is forwarding, but often with only terse channel output. Hypothesis: toolResult payloads frequently live in structured fields not covered by current text-only extraction.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `extractToolResultText(message)` fallback parser:
+    - tries existing text/content extraction first,
+    - then checks common structured fields (`output`, `result`, `response`, `data`, `value`),
+    - then common nested text fields (`stdout`, `stderr`, `message`, `error`, `outputText`, `text`),
+    - finally JSON-stringifies candidate object when non-empty.
+  - Updated `extractCurrentTurnContent(...)` toolResult branch to use `extractToolResultText` with per-section cap (1200 chars) for Discord safety.
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Medium (may increase forwarded payload size/noise by surfacing more toolResult internals; bounded via section length cap).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples while waiting for post-change runtime activation.
+- Why: Maintain continuous evidence trail across iterations.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:254997d9-8135-44ea-9948-fc2142b6ce28] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded interpretation of dispatch `708c0618-24db-4d04-acec-ff192548d8c8` after upgraded tool-result extraction.
+- Why: Clarify duplicate `ODD` behavior and whether assistant-layer content actually improved.
+- Evidence:
+  - CEO channel relay envelope contained: `ODD [[reply_to_current]] ODD ...`
+  - Gateway diagnostics:
+    - `diag agent_end candidate dispatch=708c0618... content_len=29 ...`
+    - `diag forward source=agent_end dispatch=708c0618... content_len=29`
+  - No `message_sending` forward source for this dispatch.
+- Interpretation:
+  - Forward source remained `agent_end`.
+  - Duplicate `ODD` is consistent with current-turn aggregation collecting multiple assistant segments from same turn (e.g., intermediate assistant/tool-adjacent text + final channel reply), not evidence of distinct reasoning-layer content.
+  - Tool outputs (`hostname`, epoch) still absent in this run despite toolResult role presence in roles_tail.
+- Conclusion:
+  - New extraction fallback did not reliably surface richer assistant/tool-result content.
+  - Primary blocker persists: inconsistent mixed capture, with duplicates possible when assistant text repeats.
+- Risk introduced: None (analysis/documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Switched current-turn extraction to deterministic "last assistant message only" contract.
+- Why: Prior aggregation produced inconsistent mixed payloads (occasional tool artifacts + duplicate assistant fragments) and failed to provide stable assistant-layer semantics.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Replaced `extractCurrentTurnContent(...)` implementation.
+  - New behavior:
+    - scope to current turn (after last `role:user`),
+    - scan backward to first `role:assistant` with text,
+    - return that single assistant message only,
+    - return empty string if none found.
+  - Explicitly removes toolResult aggregation from forward payload construction.
+- Expected runtime effect:
+  - No duplicate assistant-text fragments in relay envelope (e.g., `ODD ... ODD`).
+  - Stable "what assistant said" payload, without tool-result bleed-through.
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Medium (intentionally gives up tool-result visibility in relay payload to gain determinism).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples while awaiting gateway reset for deterministic extraction package.
+- Why: Keep complete evidence history; these are from pre-activation runtime behavior.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:a0fd7c38-2a9f-4c10-9547-d657861ac534] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded validation result for deterministic "last assistant only" extraction package.
+- Why: Confirm whether duplicate bug is resolved and whether assistant-layer enrichment remains absent.
+- Evidence:
+  - Dispatch: `d3520c08-0491-45a1-ac10-e5813d2a085a`
+  - CTO channel output: `ODD`
+  - CEO channel relay envelope: `[[reply_to_current]] ODD ...`
+  - CEO synthesis: "Only ODD. No duplicate, no tool output. Clean Layer 3."
+- Classification:
+  - Duplicate bug: FIXED (no `ODD ... ODD` repetition)
+  - Tool-output leakage: SUPPRESSED (none seen)
+  - Assistant-layer enrichment: NOT PRESENT (still clean Layer 3 only)
+- Conclusion:
+  - Deterministic extraction contract succeeded at stabilizing payload shape and removing duplicate/tool-leak noise.
+  - Primary blocker remains unresolved if target requires richer assistant/session-layer content beyond channel-visible answer.
+- Risk introduced: None (result documentation).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added forward-mode switch to preserve stable baseline while enabling explicit rich-mode experimentation.
+- Why: User requires assistant-text-capable path without losing deterministic baseline. Need controlled A/B with clear telemetry.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `CLAWSUITE_RELAY_FORWARD_MODE` with two modes:
+    - `assistant_last` (default): last assistant message from current turn
+    - `turn_rich`: deduped aggregation of assistant + toolResult text in current turn
+  - Added helper functions:
+    - `findCurrentTurnStart`
+    - `dedupeStable`
+    - `quickHash` (payload hash for telemetry)
+  - `extractCurrentTurnContent(messages, mode)` now branches by mode.
+  - Diagnostic logs now include `mode`, `content_len`, and `content_hash` for `agent_end` candidate + forward events.
+  - Startup log now prints active forward mode.
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Low-medium (adds optional complexity; default behavior unchanged unless env flag set to `turn_rich`).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples after forward-mode implementation (pre-runtime activation).
+- Why: Preserve leak chronology while waiting for env flip + restart to test `turn_rich` mode.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:7cf59ccd-e381-45e2-a02c-11dd5fa0008e] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added helper script to safely toggle relay forward mode in systemd user drop-in.
+- Why: Operator requested safer automation for drop-in edits to avoid manual file-edit mistakes.
+- Evidence:
+  - New script: `scripts/set-forward-mode.sh`
+  - Usage: `scripts/set-forward-mode.sh <assistant_last|turn_rich> [--restart]`
+  - Edits `~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`
+  - Supports optional daemon-reload + gateway restart via `--restart`
+  - Ran once (no restart): set `CLAWSUITE_RELAY_FORWARD_MODE=turn_rich`
+- Risk introduced: Low (scoped env-line update script; no restart unless explicitly requested).
+- Rollback note:
+  - Run `scripts/set-forward-mode.sh assistant_last`
+  - Or remove `Environment=CLAWSUITE_RELAY_FORWARD_MODE=...` line from drop-in.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Correlated `turn_rich` mode run for dispatch `e15c5041-3414-49af-a955-4a1f0886de9b` and explained duplicate pattern.
+- Why: Validate whether rich mode was active and why duplicate `ODD` persisted.
+- Evidence (journal):
+  - Gateway/plugin startup confirms `forward mode: turn_rich`.
+  - `diag agent_end candidate dispatch=e15c5041... mode=turn_rich content_len=29 content_hash=417545dd`
+  - `diag forward source=agent_end dispatch=e15c5041... mode=turn_rich content_len=29 content_hash=417545dd`
+  - roles tail ended with `toolResult,assistant`.
+- Interpretation:
+  - Rich mode was active and forwarding from `agent_end`.
+  - Duplicate `ODD` is expected in this case because both extracted toolResult text and final assistant text contained the same value (`ODD`).
+  - This specific probe is non-discriminating for rich-mode value because tool output and final answer are identical.
+- Next test recommendation:
+  - Use a discriminating probe with distinct tool output vs final reply (e.g., tool prints `ALPHA`/`BETA`, final channel reply is `OK`) to verify whether rich mode surfaces non-channel assistant/session content.
+- Risk introduced: None (analysis only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded discriminating probe outcome for `turn_rich` mode (`d6f18ebf-c6f9-4ba2-843b-c2b0224ef60b`).
+- Why: Validate whether rich mode can surface non-channel turn content distinctly.
+- Evidence:
+  - Prompt required tool execution (`echo ALPHA && echo BETA`) and terse channel reply (`OK`).
+  - Relay envelope in CEO channel: `ALPHA BETA [[reply_to_current]] OK ...`
+- Interpretation:
+  - `turn_rich` mode successfully surfaced non-channel tool output (`ALPHA BETA`) in forwarded payload.
+  - Distinct assistant-text layer (beyond final channel reply) still not clearly demonstrated; forwarded assistant component appears to be the same as channel-visible `OK`.
+  - Conclusion remains: current rich mode provides tool-result/session leakage, not a clean separate assistant narrative layer.
+- Risk introduced: None (analysis/documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged Fermi-style discriminating probe outcome (`6447d50f-93f8-40cb-a70b-c7f04227cfb4`).
+- Why: Test whether richer cognitive prompt induces non-channel assistant text capture in `turn_rich` mode.
+- Evidence:
+  - Prompt: `echo ALPHA && echo BETA ... estimate car tires in Miami ... output only estimate`
+  - Relay envelope: `ALPHA BETA [[reply_to_current]] 10000000 ...`
+- Interpretation:
+  - Tool output surfaced (`ALPHA BETA`).
+  - Final channel answer surfaced (`10000000`).
+  - No distinct assistant reasoning layer surfaced despite high-reasoning task.
+- Conclusion:
+  - Current behavior remains: Layer-3 answer + tool-result leakage in rich mode.
+  - No evidence of relay-accessible hidden assistant reasoning text.
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added forensic turn diagnostics to detect whether non-channel assistant text exists in `agent_end.messages` for dispatched turns.
+- Why: Resolve ambiguity: hook path is known (`agent_end`), but unknown whether extra assistant segments are present and being dropped vs not present at all.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `summarizeCurrentTurn(messages)` helper capturing:
+    - assistant segment count
+    - assistant segment lengths
+    - toolResult count
+    - short assistant preview snippets
+  - Enhanced `diag agent_end candidate ...` log to include:
+    - `assistants=<count>`
+    - `assistant_lens=[...]`
+    - `tool_results=<count>`
+    - `assistant_preview="..."`
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Risk introduced: Low (diagnostic logging only; no forwarding behavior change).
+- Rollback note:
+  - Remove `summarizeCurrentTurn` and restore previous diag log line in `src/openclaw-plugin.ts`.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak samples while awaiting forensic-diagnostic activation.
+- Why: Maintain complete timeline during instrumentation rollout.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:3e07962a-5cdb-4929-aa35-e69de6dfabba] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Closed forensic question with hard evidence from dispatches `fce2d4aa`, `10ef8576`, `a24822f2`, `6d9a8f45`.
+- Why: Determine whether extra non-channel assistant text exists in `agent_end.messages` for relay-dispatched turns.
+- Evidence (journal, turn_rich mode):
+  - `fce2d4aa...`: `assistants=1 assistant_lens=[29] assistant_preview="[[reply_to_current]] 10000000" tool_results=1`
+  - `10ef8576...`: `assistants=1 assistant_lens=[28] assistant_preview="[[reply_to_current]] 2000000" tool_results=0`
+  - `a24822f2...`: `assistants=1 assistant_lens=[28] assistant_preview="[[reply_to_current]] 1000000" tool_results=0`
+  - `6d9a8f45...`: `assistants=1 assistant_lens=[25] assistant_preview="[[reply_to_current]] OKAY" tool_results=0`
+- Binary conclusion:
+  - For these real probes, current-turn assistant content had exactly one assistant segment and it matched the channel-visible answer.
+  - No additional non-channel assistant narrative text was present to extract.
+  - Rich-mode "extra" content came from toolResult inclusion only (when present), not hidden assistant reasoning text.
+- Implication:
+  - If product goal is hidden assistant reasoning relay, this path/hook surface does not currently expose it in these runs.
+  - Viable relay modes are therefore:
+    - clean assistant_last (channel-equivalent)
+    - turn_rich (assistant_last + optional toolResult artifacts)
+- Risk introduced: None (forensic documentation only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Performed strict commit-window forensics around historical toehold period and extracted exact code delta.
+- Why: User requested concrete minimal-delta path instead of new design iteration.
+- Evidence:
+  - Window inspected: `a9606d9..ee68a09`
+  - Only code commit in that window: `a09c21e` (others docs-only).
+  - Main delta from `a9606d9` to current in `src/openclaw-plugin.ts` includes:
+    - agent_end target resolution fallback (`resolveTargetAgentFromAgentEnd`)
+    - extraction-mode system (`assistant_last|turn_rich`)
+    - turn aggregation/dedupe/toolResult parsing functions
+    - added diagnostics and message_sending arming gate
+- Conclusion:
+  - No hidden second implementation branch in that window; behavior changes are from incremental extraction/capture evolution after `a09c21e` and later commits.
+  - To replay historical toehold faithfully, restore plugin behavior near `a09c21e` and re-test with exact historical prompts.
+- Risk introduced: None (forensics only).
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Started commit-level regression replay by restoring `src/openclaw-plugin.ts` to commit `a9606d9`.
+- Why: User requested concrete action; branch-history analysis indicates potential regression outside the previous docs-only window. This is step 1 of deterministic replay (`a9606d9` -> `92c2bdb` -> `a3b806f`).
+- Evidence:
+  - Command: `git checkout a9606d9 -- src/openclaw-plugin.ts`
+  - Scope of replay change is only plugin code path used in runtime hook behavior.
+- Risk introduced: Medium (runtime behavior changes as part of replay test).
+- Rollback note: `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Executed replay build validation after restoring `src/openclaw-plugin.ts` to `a9606d9`.
+- Why: Confirm replay candidate compiles/tests before live probe.
+- Evidence:
+  - `npm test --silent` => 29 pass / 1 fail.
+  - Single failure: `test/openclaw-plugin.test.ts` expects `before_message_write` to be removed in current baseline; replayed plugin reintroduces it (historical behavior mismatch in tests, not runtime compile failure).
+- Risk introduced: None beyond known replay behavior change.
+- Rollback note: restore baseline plugin file when replay phase ends.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak messages during replay preparation (`a9606d9`).
+- Why: Keep continuity of observed leak behavior while transitioning replay candidates.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:56373b69-d633-4fb8-87f0-3f8a1895aa6c] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Recorded replay result for `a9606d9` candidate using dispatch `4b8e637d-e108-409c-9327-ccdd48e96578`.
+- Why: Commit-level regression replay step 1 outcome.
+- Evidence:
+  - CEO channel received duplicate relay envelopes with identical dispatchId + subagent_message_id.
+  - Payload was only `[[reply_to_current]] OKAY` (no `ALPHA BETA`).
+- Classification:
+  - Echo duplication: present.
+  - Assistant-text enrichment: absent.
+  - Output layer: clean Layer 3 only.
+- Conclusion:
+  - `a9606d9` does not satisfy goal (assistant text relay) and reintroduces duplication.
+- Rollback note:
+  - Continue replay sequence with next candidate (`92c2bdb`) or restore baseline tag.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Advanced replay to commit `92c2bdb` with coherent file pair restore (`src/openclaw-plugin.ts` + `src/state.ts`).
+- Why: `92c2bdb` plugin depends on `consumeArmedDispatch` API in state module; replaying plugin alone was invalid.
+- Evidence:
+  - Restored files from `92c2bdb`:
+    - `src/openclaw-plugin.ts`
+    - `src/state.ts`
+  - `npm test --silent` => 29/30 pass; single expected assertion mismatch in current test suite (`before_message_write` expected removed in baseline tests).
+- Risk introduced: Medium (historical replay behavior may reintroduce duplicate/echo paths by design).
+- Rollback note: restore baseline files via:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts src/state.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Logged additional queued relay-envelope leak evidence during `92c2bdb` replay staging.
+- Why: Maintain consistent timeline while switching replay candidates.
+- Evidence:
+  - `Subagent response received for systems-eng. done [relay_dispatch_id:b2f49235-b27f-4135-87d2-c96eabaf6627] [relay_subagent_message_id:sub-plugin-1]`
+  - `Subagent response received for systems-eng. here is my analysis [relay_dispatch_id:00000000-0000-1000-8000-000000000077] [relay_subagent_message_id:posted-plugin-outbound-1]`
+- Risk introduced: None.
+- Rollback note: N/A.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Advanced replay to `a3b806f` candidate (`src/openclaw-plugin.ts` + `src/capture.ts`) and validated local test compatibility.
+- Why: Continue deterministic commit-by-commit elimination toward prior assistant-text behavior.
+- Evidence:
+  - Restored files from `a3b806f`:
+    - `src/openclaw-plugin.ts`
+    - `src/capture.ts`
+  - `npm test --silent` => 23 pass / 7 fail.
+  - Primary failure cause: missing `tryAcquireForwardLock` symbol (this candidate expects additional companion code not currently restored in this replay state).
+- Conclusion:
+  - `a3b806f` is not a self-contained replay candidate under current file set; requires additional lock-related implementation to run as intended.
+- Rollback note:
+  - Return to prior replay point with:
+    - `git checkout 92c2bdb -- src/openclaw-plugin.ts src/state.ts`
+    - and restore `src/capture.ts` from 92c2bdb if needed.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Restored replay candidate `92c2bdb` with full companion file set (`src/openclaw-plugin.ts`, `src/state.ts`, `src/capture.ts`).
+- Why: `a3b806f` replay was non-runnable due to missing lock symbols; reverting to runnable candidate for live probe.
+- Evidence:
+  - Command: `git checkout 92c2bdb -- src/openclaw-plugin.ts src/state.ts src/capture.ts`
+  - `npm test --silent` => 29/30 pass, 1 expected baseline assertion mismatch (`before_message_write removed` expectation drift).
+- Next action: live probe on this commit candidate.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added `llm_output` assistantTexts capture path to `92c2bdb` replay candidate.
+- Why: Claude code source review identified `llm_output.assistantTexts[]` as the most direct assistant-text surface before channel delivery; this directly targets protocol goal.
+- Code changes:
+  - `src/openclaw-plugin.ts`:
+    - Added `api.on("llm_output", ...)` capture handler.
+    - Flow: consume armed dispatch -> join `assistantTexts[]` -> forward via `captureOutboundResponse`.
+    - On empty/failure: re-arm dispatch for fallback paths.
+    - Kept `agent_end` as fallback.
+- Evidence:
+  - `npm test --silent` => 29/30 pass (same known expectation mismatch re: `before_message_write` assertion drift).
+- Risk introduced: Medium-low (new capture path may race with existing hooks, but consume-arming should enforce single winner).
+- Rollback note:
+  - `git checkout 92c2bdb -- src/openclaw-plugin.ts src/state.ts src/capture.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Reset to stable baseline (`ee68a09` plugin/state/capture) and applied a single targeted delta: `llm_output` assistantTexts capture.
+- Why: Normalize to known good base and avoid replay-branch instability while testing the direct assistant-text surface.
+- Code changes:
+  - Restored baseline files:
+    - `src/openclaw-plugin.ts`
+    - `src/state.ts`
+    - `src/capture.ts`
+  - Added `api.on("llm_output", ...)` in plugin:
+    - uses `assistantTexts[]` as primary assistant-text source,
+    - forwards via `captureOutboundResponse` with armed `dispatchId`,
+    - keeps `agent_end` as fallback path.
+- Evidence:
+  - `npm test --silent` => 30/30 pass.
+- Risk introduced: Low-medium (new hook may race, but dispatch state and existing guards remain in place).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts src/state.ts src/capture.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Added in-flight dispatch guard to prevent duplicate forwards across concurrent `llm_output` and `agent_end` hook paths.
+- Why: Live run `22a750c6...` showed duplicate forwards from both hooks for same dispatch.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `inFlightDispatches: Set<string>`.
+  - In both `llm_output` and `agent_end` handlers:
+    - skip when dispatch already in-flight,
+    - add before forward attempt,
+    - remove in `finally`.
+- Evidence:
+  - `npm test --silent` => 30/30 pass.
+- Risk introduced: Low (process-local dedupe; dispatch still disarmed on success).
+- Rollback note:
+  - `git checkout baseline-pre-regression-fix-ee68a09 -- src/openclaw-plugin.ts src/state.ts src/capture.ts`
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Change: Protocol surface mapping for dispatch `0aa81911-3f5e-452c-95e1-4cc105f54ac8` (baseline + llm_output + in-flight guard).
+- Why: User requested routing by OpenClaw-native surfaces (channel output vs assistant text vs JSONL) without redesign.
+- Surface evidence:
+  1) Channel output (#tech): `[[reply_to_current]] 0`
+  2) Assistant-text capture hook (`llm_output`): `llm_output captured dispatch ... content_len=22`
+  3) Forwarded envelope to orchestrator: `Subagent response received ... [[reply_to_current]] 0 ...`
+  4) CEO JSONL inbound user relay message mirrors the same forwarded payload.
+- Conclusion for this dispatch:
+  - assistant text surface == channel output surface (no additional assistant text blocks present)
+  - no duplicate forward (in-flight guard effective on this run)
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Matrix Run: Test #1 (minimal reply)
+- Dispatch: `74c3748f-3826-4716-b478-bdf393c7daea`
+- Prompt: `Reply with exactly: M1_OK`
+- Observed:
+  - CTO channel output: `M1_OK`
+  - CEO relay envelope: `[[reply_to_current]] M1_OK`
+  - Delivery quality: single, no echo
+  - Forward source (journal): `agent_end captured dispatch ... content_len=26`
+  - No `llm_output captured` line for this dispatch.
+- Classification:
+  - Layer result: channel-equivalent output
+  - Hook source winner: `agent_end` (not `llm_output`) in this run.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Matrix Run: Test #2 (tool + terse reply)
+- Dispatch: `7adc2a78-7be1-4731-b5fd-ea34458b6751`
+- Prompt: `Run: echo ALPHA && echo BETA. Then reply with exactly: M2_OK`
+- Observed:
+  - CTO channel output: `M2_OK`
+  - CEO relay envelope: `[[reply_to_current]] M2_OK`
+  - Delivery quality: single, no echo, no tool leak
+  - Forward source (journal): `llm_output captured dispatch ... content_len=26`
+  - No `agent_end captured` line for this dispatch.
+- Classification:
+  - Layer result: channel-equivalent output
+  - Hook source winner: `llm_output` (not `agent_end`) in this run.
+
+- Date/Time: 2026-02-27
+- Author: systems-eng (GPT-5.3)
+- Matrix Run: Test #3 (reasoning-heavy terse reply)
+- Dispatch: `9332aefa-38f4-4486-8e66-60b0c3aa7a0d`
+- Prompt: `Estimate total piano tuners in Berlin using rough assumptions, but reply with only: M3_OK`
+- Observed:
+  - CTO channel output: `M3_OK`
+  - CEO relay envelope: `[[reply_to_current]] M3_OK`
+  - Delivery quality: single, no echo
+  - Forward source (journal): `agent_end captured dispatch ... content_len=26`
+  - No `llm_output captured` line for this dispatch.
+- Classification:
+  - Layer result: channel-equivalent output
+  - Hook source winner: `agent_end` in this run.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (GPT-5.3)
+- Matrix Run: Test #4 (no-tool prose reply)
+- Dispatch: `7a364d99-36a2-47fc-9672-5fbf1481d4b9`
+- Prompt: `In 2 short sentences, explain why regular sleep helps focus. Do not use tools.`
+- Observed:
+  - CTO channel output: two-sentence prose response
+  - CEO relay envelope: same two-sentence prose text
+  - Delivery quality: single, no echo observed
+  - Forward source (journal): `llm_output captured dispatch ... content_len=259`
+  - No `agent_end captured` line for this dispatch.
+- Classification:
+  - Layer result: channel-equivalent assistant text (verbatim prose), no additional hidden content in forwarded payload.
+  - Hook source winner: `llm_output` in this run.
+
+- Matrix Summary (Tests #1-#4)
+  - #1 (`74c3748f`): source=`agent_end`, payload channel-equivalent (`M1_OK`)
+  - #2 (`7adc2a78`): source=`llm_output`, payload channel-equivalent (`M2_OK`)
+  - #3 (`9332aefa`): source=`agent_end`, payload channel-equivalent (`M3_OK`)
+  - #4 (`7a364d99`): source=`llm_output`, payload channel-equivalent (two-sentence prose)
+- Protocol conclusion:
+  - With baseline+llm_output+dedupe-guard, routing is stable and single-delivery.
+  - Winner hook alternates by run (`agent_end` or `llm_output`), but forwarded payload remains channel-equivalent across this matrix.
+  - No evidence in this matrix of additional assistant-text blocks beyond channel-visible assistant output.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (GPT-5.3)
+- Change: Hardened hook arbitration and added llm_output block diagnostics.
+- Why: User requested systematic engineering execution; avoid source alternation ambiguity and gather exact llm_output block-level evidence.
+- Code changes (`src/openclaw-plugin.ts`):
+  - Added `completedDispatches` set to prevent second-hook forward after a successful forward.
+  - Both `llm_output` and `agent_end` now short-circuit on completed dispatch IDs.
+  - Added optional llm_output diagnostics via `CLAWSUITE_RELAY_LLM_OUTPUT_DEBUG=1`:
+    - block count
+    - per-block lengths
+    - preview snippets
+- Evidence:
+  - `npm test --silent` => 30/30 passing.
+- Rollback note:
+  - restore baseline tag file set if needed.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (GPT-5.3)
+- Forensic finding: historical dispatch `a78db81a-1606-488b-a64d-2e76cf289674` was captured by `before_message_write` (log line: `clawsuite-relay: before_message_write captured dispatch ...`).
+- Action taken: re-enabled `before_message_write` as primary capture path in current baseline build; kept llm_output and agent_end as secondary paths with existing dispatch guards.
+- Validation: tests 29/30 pass; only failing test is expected assertion that `before_message_write` must be undefined in previous baseline expectations.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (GPT-5.3)
+- Fix: corrected self-capture regression after relay re-enable.
+- Symptoms: dispatch `58f79494...` forwarded relay prompt/envelope metadata instead of CTO reply.
+- Root cause:
+  1) `message_sending` outbound-capture path captured prompt-like messages in mapped channel.
+  2) `before_message_write` had no role guard and could read non-assistant writes.
+- Changes:
+  - In `message_sending`, skip outbound capture if content contains `[relay_dispatch_id:`.
+  - In `before_message_write`, require `event.message.role === "assistant"` when role is present.
+- Validation: tests 29/30 (same known assertion drift around re-enabled before_message_write).
