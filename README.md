@@ -19,7 +19,7 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 IN PROGRESS — relay loop works (dispatch + capture + forward), but blockers remain: >2000 char payload splitting, relay envelope visibility, live suppression/fail-loud tests. See `implementation-plan.md` for full status.
+Current implementation status: Milestone 1 — PRIMARY BLOCKER RESOLVED. Full relay loop operational: dispatch → channel post → `llm_output` capture → gateway injection delivery. Content parity with native `sessions_spawn` verified. Remaining: suppression live test, fail-loud live test, >2000 char payload handling. See `implementation-plan.md` for details.
 
 ## Prerequisite: Create a second Discord bot
 

@@ -1252,3 +1252,36 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - In `message_sending`, skip outbound capture if content contains `[relay_dispatch_id:`.
   - In `before_message_write`, require `event.message.role === "assistant"` when role is present.
 - Validation: tests 29/30 (same known assertion drift around re-enabled before_message_write).
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (Claude Opus 4.6)
+- Change: Implemented internal delivery path (b) via gateway injection.
+- Why: The relay loop worked for capture but delivered via Discord message (wrong vehicle). Native `sessions_spawn` uses internal session injection. Added the equivalent path.
+- Implementation:
+  1. Extended `ArmedDispatchRecord` with `orchestratorSessionKey` (state.ts)
+  2. Switched `relay_dispatch` to factory pattern to capture orchestrator's `sessionKey` at dispatch time (relay-dispatch-tool.ts)
+  3. Created `GatewayForwardTransport` using `openclaw gateway call agent` CLI (transport-gateway.ts). Note: `callGateway` is not importable — plugin SDK has only `.d.ts` files, no `.js` in gateway/
+  4. Added `llm_output` hook as primary capture + delivery path (openclaw-plugin.ts)
+  5. Gated `agent_end` behind `CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1`
+  6. Removed Discord mirror to #general from `llm_output` and `message_sending` outbound capture
+- Commits: `5cf1d92`, `055f914`, `9fdd7fe`
+- Evidence:
+  - Live test: CEO received gateway-injected trigger message and processed result
+  - Discriminating test: subagent answered "1" (22 chars), CEO received only that via gateway, self-reported no access to reasoning — confirming content scope matches native announce
+- Risk introduced: Low. Gateway CLI subprocess per delivery adds latency but matches `sendSubagentAnnounceDirectly`'s delivery path.
+- Rollback note: Set `CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1` and remove `llm_output` hook to revert to previous agent_end path.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (Claude Opus 4.6)
+- Change: Verified content parity between relay and native `sessions_spawn`.
+- Why: Live testing showed `assistantTexts` contained only brief final text. Needed to determine if this was a relay limitation or inherent to OpenClaw.
+- Findings (source code trace):
+  1. Thinking tokens stripped at every level: `pushAssistantText` receives text already processed through `stripBlockTags` and `sanitizeTextContent`
+  2. `sessions_spawn` completion announces deliver the same content scope: `readLatestSubagentOutput` → `extractAssistantText` → same sanitization chain
+  3. No provider-specific gating on text accumulation — Discord and sessions_spawn contexts produce identical `assistantTexts` arrays
+  4. Content richness comes from the CEO's prompting style, not the transport
+- Conclusion: NOT a limitation. The relay delivers content-equivalent payloads to native `sessions_spawn`.
+- Documentation: Updated `layer-disambiguation.md` (content parity verification section), `assistant-text-analysis.md` (resolution note), `facts-established.md` (primary blocker resolved), `RELAY-START.md` (architecture reflects both paths), `implementation-plan.md` (blocker checked off), `relay-bot-plan.md` (message flow, comparison table), `technical-design-doc.md` (acceptance criteria), `README.md` (status)
+- Terminology correction: "Surfaces" (independent access paths) instead of "layers" (which implied hierarchy). Four surfaces: assistantTexts array, completion announce, sessions_history, raw JSONL.
+- Risk introduced: None. Documentation-only change.
+- Rollback note: N/A.

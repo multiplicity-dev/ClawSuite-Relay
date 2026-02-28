@@ -6,66 +6,92 @@ This is the only document the systems engineer must read on session start.
 
 ---
 
-## The problem in one paragraph
+## Current state (2026-02-28)
 
-The relay loop works: orchestrator dispatches to subagent channel, subagent responds, response is captured by plugin hooks, and forwarded back. But the forward path delivers content via a **Discord message** to #general. A Discord message can only carry channel-visible text. In normal `sessions_spawn`, the orchestrator receives assistant text via **internal injection** (`sessions_send` → `role: "user"` trigger message). The relay has no equivalent internal delivery path. Every hook optimization (capture side) was solving the wrong half — the **delivery side** is the missing piece.
+The relay loop is complete. Both paths operational:
+- **(a) Channel output** — subagent posts to its own channel (visible to president). No mirror to #general.
+- **(b) Internal delivery** — relay plugin captures `assistantTexts[last]` via `llm_output` hook and delivers to orchestrator's session via `openclaw gateway call agent` (gateway injection). This matches the completion announce in native `sessions_spawn`.
 
-## What must happen
+Content parity with native `sessions_spawn` confirmed via source code trace. `assistantTexts[last]` is content-equivalent to what the completion announce delivers — thinking tokens stripped at every level, no provider-specific gating. Content richness comes from the CEO's prompting style, not from the transport.
 
-Two paths, not one:
-- **(a) Channel output** — subagent posts to its own channel (visible to president). The current mirror to #general is an artifact, not the goal.
-- **(b) Internal delivery** — relay plugin delivers last assistant message text to orchestrator's session via internal mechanism (e.g., `sessions_send`), matching the completion announce. This is what the orchestrator actually works from.
+## Architecture summary
 
-The relay currently has only (a). Path (b) does not exist yet.
+```
+President → #general → CEO processes → CEO calls relay_dispatch tool
+                                    ↓
+                            Tool factory captures CEO's sessionKey
+                            Relay bot posts prompt to #it (mentions CTO)
+                                    ↓
+                            CTO responds in #it (main session, persistent)
+                                    ↓
+                            llm_output hook fires with assistantTexts[]
+                                    ↓
+                    ┌───────────────┴───────────────┐
+                    ↓                               ↓
+            (a) Channel output              (b) Gateway injection
+            CTO's response stays            assistantTexts[last] →
+            in #it (no #general mirror)     openclaw gateway call agent →
+                                            trigger message injected into
+                                            CEO's session as role: "user"
+                                    ↓
+                            CEO synthesizes in #general
+```
 
-## What to capture and deliver
+## What the orchestrator receives (trigger message format)
 
-- **Capture:** `llm_output` hook → `event.assistantTexts[event.assistantTexts.length - 1]` (last entry = last assistant message).
-- **Deliver:** Via internal path, not Discord. The payload should be framed like a completion announce trigger (subagent identity, dispatch correlation, result text, sessionKey for on-demand `sessions_history`).
-- **Do not** forward the full `assistantTexts` array or `sessions_history` transcript. The orchestrator's context budget must stay clean for cross-agent synthesis.
+```
+[System Message] [relay-dispatch: <dispatchId>] Relay task for <agentId> completed.
 
-## Why we got stuck
+Result:
+<last assistant message text>
 
-The capture hooks work. `llm_output`, `agent_end`, and `before_message_write` all fire and contain assistant text. But every captured payload was delivered via Discord message to #general — reducing it back to channel-visible content. Optimizing extraction logic could never fix a delivery transport problem.
+[relay_dispatch_id:<dispatchId>]
+[relay_subagent_message_id:<subagentMessageId>]
+[relay_subagent_session_key:<sessionKey>]
 
----
+Reply based on the result above. If multiple relay tasks are outstanding, wait for all to complete before synthesizing.
+```
 
-## Mandatory reads on session start
+The `sessionKey` metadata allows the orchestrator to call `sessions_history` on-demand for deeper context, matching the native `sessions_spawn` completion announce behavior.
 
-1. **This file** (you're reading it).
-2. **`facts-established.md`** — control state: goal, blocker, active step, hook ledger.
-3. **`phase1-workflow.md`** — execution cadence, anti-duplication rules, per-change loop.
+## Key implementation files
 
-Then execute one cycle from the active step in `facts-established.md`.
+| File | Role |
+|---|---|
+| `src/openclaw-plugin.ts` | Plugin entry: hooks (`llm_output`, `message_received`, `message_sending`), tool registration |
+| `src/transport-gateway.ts` | Gateway injection transport: `buildRelayTriggerMessage`, `GatewayForwardTransport` |
+| `src/relay-dispatch-tool.ts` | Tool factory: captures orchestrator's `sessionKey` at dispatch time |
+| `src/index.ts` | `relay_dispatch` core logic: validation, state management, transport call |
+| `src/state.ts` | Disk-persisted dispatch + armed dispatch state |
+| `src/transport-discord.ts` | Discord relay bot transport (outbound prompt posting) |
 
-## Read when needed (not every turn)
+## Reference docs (read when needed)
 
 | Doc | When to read |
 |---|---|
-| `layer-disambiguation.md` | When confused about surfaces, delivery paths, or what the orchestrator receives. **Start here if the problem feels unclear.** Contains: four-surface model, missing vehicle analysis, transport question, verification test design. |
-| `dev-log.md` | When reviewing evidence for a specific dispatch or test. Read only the newest relevant section. |
+| `layer-disambiguation.md` | When confused about surfaces, delivery paths, or content parity. Contains: four-surface model, content parity verification, test design. |
+| `assistant-text-analysis.md` | When tracing OpenClaw source code for extraction functions or hook internals. |
+| `dev-log.md` | When reviewing evidence for a specific dispatch or test. |
 | `live-activation-runbook.md` | When doing restart, config, or smoke-test operations. |
 | `implementation-plan.md` | When updating blocker/checklist status. |
 | `relay-bot-plan.md` / `technical-design-doc.md` | When checking contract, spec, or architecture decisions. |
-| `assistant-text-analysis.md` | When tracing OpenClaw source code for extraction functions or hook internals. |
 
 ## Reset recovery protocol
 
 When starting fresh (compaction, session reset, new conversation):
 
 1. Read this file.
-2. Read `facts-established.md` and `phase1-workflow.md`.
+2. Read `facts-established.md`.
 3. Verify runtime/code state directly (do not rely on chat memory):
    - `git status --short`
    - `git rev-parse --short HEAD`
    - `grep CLAWSUITE_RELAY_ENABLED ~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`
 4. Summarize recovered state in one short status block.
-5. Execute one cycle from the active step in `facts-established.md`.
+5. Check `implementation-plan.md` for remaining work items.
 
 ## Guardrails
 
 - No process-token invention.
 - No asking user to choose document routing.
-- No new hypothesis until current active step in `facts-established.md` is resolved.
 - If blocked, report blocker + one proposed unblock action.
-- If confused about what the orchestrator receives or why forwarded content matches channel text, read `layer-disambiguation.md` before changing code.
+- If confused about what the orchestrator receives or content scope, read `layer-disambiguation.md` before changing code.

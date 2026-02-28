@@ -2,7 +2,7 @@
 
 **Created:** 2026-02-26  
 **Owner:** President (design), CTO (implementation)  
-**Status:** Milestone 1 implementation IN PROGRESS — core relay loop works, blockers remain (see implementation-plan.md)
+**Status:** Milestone 1 — PRIMARY BLOCKER RESOLVED. Capture + delivery working (see implementation-plan.md for remaining polish)
 **Source conversation:** orchestrator #general session, Feb 26 2026 (afternoon/evening)  
 **Reference docs:**
 - `/home/dave/Documents/Notes/ceo/multi-agent-research.md` — research on multi-agent patterns, context gathering, community approaches
@@ -48,7 +48,7 @@ OpenClaw exposes subagent output through four distinct surfaces (see `layer-disa
 
 **The relay targets Surface 2** — the last assistant message, matching the completion announce. The orchestrator receives concise results it can synthesize across agents, not raw transcripts or intermediate reasoning.
 
-Today the president only sees orchestrator's synthesis (Layer 3). The relay bot makes Surface 2 content visible in subagent channels and routes it back to the orchestrator.
+Today the president only sees orchestrator's synthesis. The relay bot makes Surface 2 content visible in subagent channels and routes it back to the orchestrator via gateway injection.
 
 ### 1.4 Why this matters beyond debugging
 
@@ -110,10 +110,10 @@ From the orchestrator's perspective: "I compose prompts, they get posted to chan
 ### 3.2 Message flow
 
 ```
-President → #general → orchestrator processes → orchestrator composes task prompt
+President → #general → orchestrator processes → orchestrator calls relay_dispatch
                                             ↓
-                                    Relay bot posts prompt to #it
-                                    (mentions CTO, from different bot token)
+                            Tool factory captures orchestrator's sessionKey
+                            Relay bot posts prompt to #it (mentions CTO)
                                             ↓
                                     CTO sees message in main session
                                     (requireMention satisfied by relay bot's @CTO)
@@ -122,8 +122,12 @@ President → #general → orchestrator processes → orchestrator composes task
                                             ↓
                                     llm_output hook fires with assistantTexts[]
                                             ↓
-                                    Plugin forwards last assistant message to orchestrator
-                                    (via sessions_send or enqueueSystemEvent)
+                    ┌───────────────────────┴───────────────────────┐
+                    ↓                                               ↓
+            (a) Channel output                              (b) Gateway injection
+            CTO's response stays in #it                     assistantTexts[last] →
+            (no mirror to #general)                         openclaw gateway call agent →
+                                                            trigger message → orchestrator session
                                             ↓
                                     orchestrator synthesizes in #general
 ```
@@ -150,9 +154,9 @@ A second bot token bypasses this filter. With `allowBots=true`, the relay bot's 
 
 ### 3.5 How orchestrator receives the response
 
-The plugin forwards subagent responses to orchestrator via `sessions_send`, which triggers a orchestrator turn.
+The plugin forwards subagent responses to orchestrator via `openclaw gateway call agent` (gateway injection), which injects a `role: "user"` trigger message into the orchestrator's session and triggers an orchestrator turn. This matches the delivery path used by `sendSubagentAnnounceDirectly` in native `sessions_spawn` flows.
 
-**Single-subagent dispatch:** Straightforward. subagent responds → plugin forwards → orchestrator synthesizes.
+**Single-subagent dispatch:** Straightforward. subagent responds → `llm_output` hook fires → plugin injects trigger message via gateway → orchestrator synthesizes.
 
 **Multi-subagent dispatch:** The plugin batches responses (see 3.6) and only calls `sessions_send` once with the complete set. orchestrator should not be woken per-response — waking orchestrator on each arrival burns tokens on intermediate "not yet complete" turns and requires separate enforcement to ensure orchestrator waits rather than synthesizing prematurely on partial information. The plugin owns the batching logic; orchestrator is only triggered when all expected responses are in.
 
@@ -161,7 +165,9 @@ The plugin forwards subagent responses to orchestrator via `sessions_send`, whic
 - **Correlation ID** — which dispatch batch this belongs to (for multi-subagent flows)
 - **Response text** — the subagent's last assistant message text
 
-Without this framing, orchestrator must infer attribution, which is error-prone when multiple subagents respond to related prompts. The exact format is a Track A implementation decision, but the requirement is fixed: orchestrator must receive enough metadata to synthesize without guessing. The goal is for orchestrator to receive the subagent's last assistant message — matching what the completion announce delivers in normal `sessions_spawn` flows, without drowning orchestrator in intermediate reasoning or raw JSONL. The orchestrator can always call `sessions_history` on-demand for deeper context on a specific subagent.
+Without this framing, orchestrator must infer attribution, which is error-prone when multiple subagents respond to related prompts. The implemented trigger message format includes: `[relay_dispatch_id]`, `[relay_subagent_message_id]`, `[relay_subagent_session_key]`, and a structured `Result:` field. The orchestrator receives the subagent's last assistant message — matching what the completion announce delivers in native `sessions_spawn` flows — plus the `sessionKey` for on-demand `sessions_history` access.
+
+**Content parity note (verified 2026-02-28):** Source code tracing confirmed that `assistantTexts[last]` is content-equivalent to what the completion announce delivers. Thinking tokens are stripped at every level. There is no "richer content" in either flow — both deliver the final visible text. The content richness that distinguishes relay responses from casual chatbot answers comes from how the CEO prompts the subagent, not from the transport.
 
 ### 3.6 Parallel dispatch coordination
 
@@ -190,12 +196,15 @@ Discord's 2000-character limit applies to channel delivery. If the last assistan
 
 | | Today (sessions_spawn) | Relay bot |
 |---|---|---|
-| orchestrator gets | Completion announce: status line + last assistant message text | `llm_output` hook: last entry of `assistantTexts` (same content) |
+| orchestrator gets | Completion announce: status line + last assistant message text | Gateway injection: `assistantTexts[last]` in trigger message (same content scope) |
+| Delivery mechanism | `sendSubagentAnnounceDirectly` → gateway `method: "agent"` | `openclaw gateway call agent` → same gateway `method: "agent"` |
 | Intermediate steps | Not included (deliberate — preserves orchestrator context budget) | Not included |
-| Full transcript | Accessible via `sessions_history` on-demand | Work happens in main session; accessible via `sessions_history` on-demand |
-| Richness | Equivalent | Equivalent |
+| Full transcript | Accessible via `sessions_history` on-demand | Accessible via `sessions_history` on-demand (`sessionKey` in trigger metadata) |
+| Content scope | Equivalent | Equivalent (verified via source code trace 2026-02-28) |
 
-The relay bot delivers the same content the orchestrator would receive from a completion announce — the subagent's last assistant message. It does NOT change what orchestrator works off of for synthesis. It changes WHERE the work happens (main session vs transient) and WHO can see it (everyone in channel vs nobody). The orchestrator can call `sessions_history` on either path if it needs deeper context.
+The relay bot delivers the same content the orchestrator would receive from a completion announce — the subagent's last assistant message. Both paths use the same gateway RPC (`method: "agent"`) for delivery. The relay changes WHERE the work happens (main session vs transient) and WHO can see it (everyone in channel vs nobody), not WHAT the orchestrator receives.
+
+Content richness depends on the CEO's prompting style. When the CEO dispatches structured tasks (as it naturally does), the subagent produces extensive responses — that extensive text IS the last assistant message, and that IS what the relay delivers. Casual "chatbot-style" brevity occurs when the subagent is prompted casually, not because of a transport limitation.
 
 ### 3.9 Concurrent session access
 
@@ -286,7 +295,7 @@ These facts were verified by CTO from OpenClaw source code, not inferred:
 
 **Validation criteria:**
 - [x] orchestrator composes prompt → appears in subagent channel (via relay bot) — **VERIFIED LIVE**
-- [ ] subagent responds in channel → orchestrator receives last assistant message (via `llm_output` hook) — **PENDING RETEST** (switching from `agent_end` to `llm_output`). Caveat: >2000 char payloads fail.
+- [x] subagent responds in channel → orchestrator receives last assistant message (via `llm_output` → gateway injection) — **VERIFIED LIVE 2026-02-28**. Content parity with native `sessions_spawn` confirmed. Caveat: >2000 char payloads untested with gateway path.
 - [ ] subagent remembers the work in subsequent direct conversations — **NOT TESTED**
 - [x] President can see both prompt and response in subagent channel — **VERIFIED LIVE**
 - [x] No loops or cascading responses — **VERIFIED LIVE** (echo prevention via relay bot user ID filter + envelope guards)

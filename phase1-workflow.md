@@ -57,6 +57,6 @@ Keep Phase 1 execution tractable: one control file, one evidence log, one runboo
 5. Update blocker status in `implementation-plan.md`
 
 ## Completion condition (Phase 1)
-- Assistant-text surfacing behavior is deterministic and evidenced.
-- Relay loop stable in live tests.
-- Blockers in `implementation-plan.md` marked complete with evidence references.
+- [x] Assistant-text surfacing behavior is deterministic and evidenced. (`llm_output` → `assistantTexts[last]` → gateway injection. Content parity with native `sessions_spawn` confirmed 2026-02-28.)
+- [ ] Relay loop stable in live tests. (Core loop verified; suppression + fail-loud paths untested live.)
+- [ ] Blockers in `implementation-plan.md` marked complete with evidence references. (Primary blocker resolved; polish items remain.)

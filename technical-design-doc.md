@@ -1,13 +1,13 @@
 # Technical Design Doc (TDD) — Relay Bot Initiative
 
-Status: Milestone 1 IN PROGRESS — core relay loop works, blockers remain (see implementation-plan.md)
+Status: Milestone 1 — PRIMARY BLOCKER RESOLVED. Capture + delivery working (see implementation-plan.md for remaining polish)
 
 ## 1. Scope
 - In-scope (v1):
   - Single-subagent relay for `systems-eng` only (CTO lane)
   - `relay_dispatch` contract + deterministic status codes
   - Relay bot posts orchestrator prompt into mapped subagent channel with mention
-  - `llm_output` hook captures subagent's last assistant message and forwards structured payload to orchestrator (matching completion announce content)
+  - `llm_output` hook captures subagent's last assistant message and delivers via gateway injection to orchestrator session (matching completion announce content and delivery mechanism)
   - Fail-loud behavior (no silent fallback)
   - Basic correlation IDs and audit logging
   - Suppress redundant transient subagent completion announce in `#general` when relay mode is active
@@ -105,11 +105,11 @@ Persistence:
 - **Version control policy:** all design/ops docs in this initiative are committed to git along with code changes (same milestone PR/commit set), so rollback can be performed from repository state.
 ## 9. Acceptance Criteria
 
-### Implementation status (2026-02-27)
+### Implementation status (2026-02-28)
 
 - functional:
   - [x] orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot — **VERIFIED LIVE**
-  - [ ] subagent's last assistant message is captured via `llm_output` hook and forwarded to orchestrator with dispatchId — **IMPLEMENTATION PENDING** (switching from `agent_end` to `llm_output`; forwards `assistantTexts[last]` to match completion announce). Caveat: >2000 char payloads fail (Discord limit, needs message splitting).
+  - [x] subagent's last assistant message captured via `llm_output` hook and delivered to orchestrator via gateway injection — **VERIFIED LIVE 2026-02-28**. `assistantTexts[last]` → `openclaw gateway call agent` → trigger message in orchestrator session. Content parity with native `sessions_spawn` confirmed via source code trace.
 - reliability:
   - [ ] transient relay API errors recover within retry budget — **NOT IMPLEMENTED** (no retry logic in v1)
   - [ ] timeout paths produce explicit `FAILED` state + operator notice — **NOT IMPLEMENTED** (no timeout tracking in v1)
