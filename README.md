@@ -7,6 +7,8 @@ Routes orchestrator delegation into subagent channels for transparent prompt/res
 ## Project docs
 - `relay-bot-plan.md` — architecture and rationale
 - `technical-design-doc.md` — implementation contract + documentation policy
+- `design-decisions.md` — key design rationale, trade-offs, and technical insights
+- `layer-disambiguation.md` — four-surface model and content parity verification
 - `implementation-plan.md` — milestones and acceptance gates
 - `dev-log.md` — chronological decisions/evidence
 - `test-validation-plan.md` — validation checklist and evidence format

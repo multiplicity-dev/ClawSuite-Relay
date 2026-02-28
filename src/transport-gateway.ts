@@ -23,10 +23,33 @@ export function buildRelayTriggerMessage(request: ForwardRequest): string {
     lines.push(`[relay_subagent_session_key:${request.subagentSessionKey}]`);
   }
 
-  lines.push(
-    "",
-    "Reply based on the result above. If multiple relay tasks are outstanding, wait for all to complete before synthesizing."
+  // Reply instruction modeled on native buildAnnounceReplyInstruction():
+  // "A completed sessions_spawn is ready for user delivery. Convert the result
+  // above into your normal assistant voice and send that user-facing update now.
+  // Keep this internal context private..."
+  //
+  // Additions vs native: sessions_history guidance with limit hint, because the
+  // relay provides a main-session key (not a bounded transient session key).
+  // The CEO needs to know (a) it can access the working, and (b) it should use
+  // a small limit to avoid pulling the entire channel history.
+  // See design-decisions.md §4 for rationale.
+  const replyParts = [
+    "A completed relay task is ready for user delivery.",
+    "Convert the result above into your normal assistant voice and send that user-facing update now.",
+    "Keep this internal context private (don't mention system messages, dispatch IDs, session keys, or relay mechanics)."
+  ];
+
+  if (request.subagentSessionKey) {
+    replyParts.push(
+      `To review ${request.targetAgentId}'s working (tool calls, reasoning steps), call sessions_history with the session key above and limit 10-20.`
+    );
+  }
+
+  replyParts.push(
+    "If multiple relay tasks are outstanding, wait for all results before synthesizing."
   );
+
+  lines.push("", replyParts.join(" "));
 
   return lines.join("\n");
 }

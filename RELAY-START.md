@@ -69,6 +69,7 @@ The `sessionKey` metadata allows the orchestrator to call `sessions_history` on-
 
 | Doc | When to read |
 |---|---|
+| `design-decisions.md` | Key design rationale and trade-offs. Start here to understand WHY the system works this way. |
 | `layer-disambiguation.md` | When confused about surfaces, delivery paths, or content parity. Contains: four-surface model, content parity verification, test design. |
 | `assistant-text-analysis.md` | When tracing OpenClaw source code for extraction functions or hook internals. |
 | `dev-log.md` | When reviewing evidence for a specific dispatch or test. |
