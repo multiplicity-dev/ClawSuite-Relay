@@ -34,39 +34,12 @@ test("registers hooks and relay_dispatch tool factory", () => {
   const { api, hooks, tools } = createMockApi();
   register(api);
 
-  // Only two hooks: llm_output (capture + delivery) and message_sending (suppression)
+  // llm_output is the sole hook (capture + gateway delivery)
   assert.equal(typeof hooks.llm_output, "function");
-  assert.equal(typeof hooks.message_sending, "function");
   assert.equal(hooks.message_received, undefined);
   assert.equal(hooks.agent_end, undefined);
   assert.equal(tools.length, 1);
   assert.equal(typeof tools[0].tool, "function");
-});
-
-test("message_sending cancels transient announce when correlated dispatch exists", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const dispatch = await relay_dispatch(
-    { targetAgentId: "systems-eng", task: "work", requestId: "plugin-send-1" },
-    { transport: { async postToChannel() { return { messageId: "post-plugin-1" }; } } }
-  );
-
-  // Move dispatch to suppressible state via direct state update
-  // (message_received is gated behind env flag and not active here).
-  const saved = await loadDispatch(dispatch.dispatchId!);
-  assert.ok(saved);
-  await updateDispatch({ ...saved, state: "COMPLETED", subagentResponseMessageId: "sub-plugin-1" });
-
-  const result = await hooks.message_sending(
-    {
-      content: `subagent completed [relay_dispatch_id:${dispatch.dispatchId}]`,
-      metadata: { channelId: "1474868861525557308" }
-    },
-    { channelId: "discord", conversationId: "1474868861525557308" }
-  );
-
-  assert.deepEqual(result, { cancel: true });
 });
 
 test("llm_output captures only after dispatch is armed", async () => {

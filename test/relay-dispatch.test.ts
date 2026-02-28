@@ -15,10 +15,10 @@ test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
 });
 
-test("rejects unmapped target", async () => {
+test("unmapped target fails at transport with RELAY_UNAVAILABLE", async () => {
   const res = await relay_dispatch({ targetAgentId: "orchestrator", task: "hello" });
-  assert.equal(res.status, "rejected");
-  assert.equal(res.code, "TARGET_UNMAPPED");
+  assert.equal(res.status, "failed");
+  assert.equal(res.code, "RELAY_UNAVAILABLE");
 });
 
 test("rejects missing task", async () => {
@@ -51,6 +51,25 @@ test("accepted dispatch is persisted and posted", async () => {
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.targetAgentId, "systems-eng");
+});
+
+test("dispatch to second agent succeeds (multi-agent)", async () => {
+  const calls: Array<{ targetAgentId: string }> = [];
+  const mockTransport = {
+    async postToChannel(req: { dispatchId: string; targetAgentId: string; task: string }) {
+      calls.push(req);
+      return { messageId: "m-clo" };
+    }
+  };
+
+  const res = await relay_dispatch(
+    { targetAgentId: "clo", task: "review contract" },
+    { transport: mockTransport }
+  );
+  assert.equal(res.status, "accepted");
+  assert.ok(res.dispatchId);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.targetAgentId, "clo");
 });
 
 test("duplicate requestId returns existing dispatch", async () => {

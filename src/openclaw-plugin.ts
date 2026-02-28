@@ -1,4 +1,3 @@
-import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv } from "./transport-discord.js";
 import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
 import { clearArmedDispatch, getArmedDispatch, loadDispatch, updateDispatch } from "./state.js";
@@ -14,48 +13,8 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function resolveChannelId(event: any, ctx: any): string | undefined {
-  return asString(event?.metadata?.channelId) ?? asString(ctx?.conversationId) ?? asString(event?.to);
-}
-
-function isDiscordHookContext(event: any, ctx: any): boolean {
-  const candidates = [
-    asString(ctx?.channelId),
-    asString(event?.channel),
-    asString(event?.metadata?.channel),
-    asString(event?.metadata?.provider)
-  ];
-  return candidates.some((c) => c === "discord");
-}
-
-function resolveRelatedSubagentMessageId(event: any): string | undefined {
-  return asString(event?.metadata?.relatedSubagentMessageId) ?? asString(event?.relatedSubagentMessageId);
-}
-
-function resolveOutboundContent(event: any): string {
-  const candidates = [
-    asString(event?.content),
-    asString(event?.text),
-    asString(event?.metadata?.content),
-    asString(event?.payload?.content),
-    asString(event?.message?.content),
-    asString(event?.components?.text)
-  ].filter(Boolean) as string[];
-
-  if (candidates.length > 0) return candidates[0]!;
-
-  const texts = event?.components?.texts;
-  if (Array.isArray(texts)) {
-    const joined = texts.map((t: unknown) => asString(t)).filter(Boolean).join("\n");
-    if (joined.trim()) return joined;
-  }
-
-  return "";
-}
-
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
-  const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
 
   let relayTransport;
   try {
@@ -165,33 +124,6 @@ export default function register(api: PluginApi) {
       api.logger.warn?.(
         `clawsuite-relay: llm_output capture error (${String(err)})`
       );
-    }
-  });
-
-  // Announce suppression: cancel transient redundant announces in orchestrator channel.
-  api.on("message_sending", async (event, ctx) => {
-    if (!isDiscordHookContext(event, ctx)) return;
-
-    const channelId = resolveChannelId(event, ctx);
-    if (!channelId) return;
-
-    const content = resolveOutboundContent(event);
-
-    const suppress = await shouldSuppressTransientGeneralAnnounce(
-      {
-        channelId,
-        content,
-        relatedSubagentMessageId: resolveRelatedSubagentMessageId(event)
-      },
-      {
-        relayEnabled,
-        orchestratorChannelId
-      }
-    );
-
-    if (suppress) {
-      api.logger.info?.("clawsuite-relay: suppressed transient orchestrator announce");
-      return { cancel: true };
     }
   });
 }

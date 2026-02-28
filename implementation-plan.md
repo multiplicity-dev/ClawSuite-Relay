@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Phase 2 COMPLETE (envelope verified live 2026-02-28, dispatch 2fc74431).
+Status: Phase 2 COMPLETE. Multi-agent generalization + 12-agent onboarding complete (2026-02-28). Propensity test (Phase 3 prerequisite) ready for live execution.
 
 ## Phase 0 — Design Freeze
 - [x] Approve TDD
@@ -72,14 +72,16 @@ Status: Phase 2 COMPLETE (envelope verified live 2026-02-28, dispatch 2fc74431).
 
 ---
 
-## Phase 3 — Dispatch Routing Enforcement
+## Phase 3 — Dispatch Routing Enforcement — LIKELY UNNECESSARY
 
 **Goal:** Ensure the CEO uses `relay_dispatch` for relay-bound agents instead of drifting back to `sessions_spawn`.
 
-### Routing policy
-- [ ] **`before_tool_call` hook blocking `sessions_spawn` for relay-bound agents** — when the CEO attempts `sessions_spawn(agentId="systems-eng")`, block it with an error message redirecting to `relay_dispatch`. The error message must tell the CEO what to do, not just what it can't do.
-- [ ] **Allow `sessions_spawn` for non-relay agents** — ephemeral research spawns (ad-hoc agents without channel mappings) should continue using `sessions_spawn`. The routing decision is: does this agent have a relay channel mapping? If yes → relay. If no → `sessions_spawn`.
-- [ ] **Design decision: hybrid routing** — can the CEO use both `relay_dispatch` and `sessions_spawn` for the same agent? Use case: `sessions_spawn` for quick fire-and-forget tasks, `relay_dispatch` for tasks that benefit from channel context and visibility. This may be over-engineering for now — simpler to enforce relay-only for mapped agents.
+**Status (2026-02-28):** Propensity test showed CEO defaults to relay_dispatch without enforcement. Test was contaminated (CEO heavily primed from relay development + self-edited TOOLS.md), but CEO's self-reported reasoning suggests genuine preference based on persistent channel context. Defer until naive subject testing provides cleaner signal. See `agentic-experimental-design.md` case study 3.
+
+### Routing policy (deferred)
+- [ ] `before_tool_call` hook blocking `sessions_spawn` for relay-bound agents
+- [ ] Allow `sessions_spawn` for non-relay agents
+- [ ] Design decision: hybrid routing
 
 ### Acceptance — Phase 3
 - [ ] CEO uses `relay_dispatch` for CTO without manual correction
@@ -122,18 +124,25 @@ Status: Phase 2 COMPLETE (envelope verified live 2026-02-28, dispatch 2fc74431).
 - [ ] **Partial completion handling** — what happens when one subagent responds and another times out? Notify orchestrator with partial results + explicit gap report.
 
 ### Agent rollout
-- [ ] **CLO (legal) channel mapping** — second relay-bound agent
-- [ ] **V1_TARGET_AGENT expansion** — remove single-agent restriction, validate against channel map instead
+- [x] **CLO (legal) channel mapping** — second relay-bound agent (2026-02-28)
+- [x] **V1_TARGET_AGENT removal** — removed single-agent restriction, transport validates against channel map (2026-02-28)
+- [x] **All 12 agents onboarded** — full channel + mention maps deployed (2026-02-28)
 - [ ] **Per-agent relay configuration** — different timeout, retry, and routing policies per agent
+
+### All-directional relay
+- [ ] **Any agent → any agent dispatch** — currently only CEO has `tools.alsoAllow: ["relay_dispatch"]`. Enable other agents to dispatch (e.g., CTO → CLO, CTO → CEO). Requires per-agent `alsoAllow` + soul.md updates. No code changes — config only.
+- [ ] **Design decision: dispatch topology** — should all agents dispatch freely to all others, or restrict to hub-and-spoke (only to/from orchestrator)? Free-form enables peer collaboration but may create coordination complexity.
 
 ### Packaging
 - [ ] **Plugin packaging for distribution** — move from local install to ClawHub-ready package
 - [ ] **Configuration schema** — formalize env vars into plugin config schema
 
 ### Acceptance — Phase 5
-- [ ] Two-agent relay dispatch with scripted fan-in
-- [ ] Orchestrator synthesizes from both results in single response
-- [ ] Agent rollout does not require code changes (config-only)
+- [x] Multi-agent relay dispatch works end-to-end (12 agents verified, 2026-02-28)
+- [x] Orchestrator synthesizes from multiple parallel results in single conversation (4-way parallel verified)
+- [x] Agent rollout does not require code changes (config-only)
+- [ ] All-directional dispatch topology designed and deployed
+- [x] Multi-dispatch coordination works behaviorally — CEO tracked 4 parallel async dispatches and synthesized correctly without scripted fan-in (2026-02-28). Scripted fan-in deferred unless behavioral coordination fails under stress.
 
 ---
 

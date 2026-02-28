@@ -4,7 +4,6 @@ import { findDispatchByRequestId, saveDispatch, setArmedDispatch, updateDispatch
 import { UnconfiguredRelayTransport, type RelayTransport } from "./transport.js";
 import {
   RELAY_CODES,
-  V1_TARGET_AGENT,
   type DispatchRecord,
   type RelayDispatchRequest,
   type RelayDispatchResponse
@@ -33,6 +32,14 @@ function isReplayableState(state: DispatchRecord["state"]): boolean {
   );
 }
 
+/**
+ * Core dispatch orchestration. Validates inputs, handles idempotency,
+ * persists dispatch state, and posts the task to the target agent's
+ * Discord channel via the injected transport.
+ *
+ * Returns a deterministic response: "accepted" (posted), "rejected"
+ * (bad input), or "failed" (transport/persistence error, may be retryable).
+ */
 export async function relay_dispatch(
   request: RelayDispatchRequest,
   deps: RelayDispatchDeps = {}
@@ -41,15 +48,6 @@ export async function relay_dispatch(
 
   if (!request?.targetAgentId?.trim()) return invalid("targetAgentId is required");
   if (!request?.task?.trim()) return invalid("task is required");
-
-  if (request.targetAgentId !== V1_TARGET_AGENT) {
-    return {
-      status: "rejected",
-      code: RELAY_CODES.TARGET_UNMAPPED,
-      message: `v1 only supports targetAgentId=${V1_TARGET_AGENT}`,
-      retryable: false
-    };
-  }
 
   if (request.requestId?.trim()) {
     const existing = await findDispatchByRequestId(request.requestId);

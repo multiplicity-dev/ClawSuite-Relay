@@ -1,3 +1,16 @@
+/**
+ * File-backed dispatch persistence. Two directories:
+ * - dispatches/  — one JSON file per dispatch (keyed by dispatchId UUID)
+ * - armed/       — one JSON file per agent (keyed by targetAgentId)
+ *
+ * "Armed" dispatches mark which agent is expected to respond next.
+ * The llm_output hook checks the armed file to correlate subagent
+ * responses back to the originating dispatch.
+ *
+ * Directories default to ~/.openclaw/extensions/relay-bridge/ but can
+ * be overridden via CLAWSUITE_RELAY_DISPATCH_DIR / CLAWSUITE_RELAY_ARMED_DIR
+ * (used by tests with temp dirs).
+ */
 import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -74,59 +87,11 @@ async function findDispatchRecord(
   return null;
 }
 
-export function findDispatchByPostedMessageId(
-  postedMessageId: string
-): Promise<DispatchRecord | null> {
-  if (!postedMessageId?.trim()) return Promise.resolve(null);
-  return findDispatchRecord((r) => r.postedMessageId === postedMessageId);
-}
-
 export function findDispatchBySubagentResponseMessageId(
   subagentResponseMessageId: string
 ): Promise<DispatchRecord | null> {
   if (!subagentResponseMessageId?.trim()) return Promise.resolve(null);
   return findDispatchRecord((r) => r.subagentResponseMessageId === subagentResponseMessageId);
-}
-
-export async function findPendingDispatchForAgent(
-  targetAgentId: string,
-  opts: { maxAgeMs?: number } = {}
-): Promise<DispatchRecord | null> {
-  if (!targetAgentId?.trim()) return null;
-  const now = Date.now();
-  const maxAgeMs = opts.maxAgeMs;
-
-  // Uses a manual scan (not findDispatchRecord) because we need to pick
-  // the most-recently-updated match, not just the first match.
-  await ensureDispatchDir();
-  const files = await readdir(getDispatchDir());
-  let best: DispatchRecord | null = null;
-
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
-    try {
-      const raw = await readFile(join(getDispatchDir(), file), "utf8");
-      const parsed = JSON.parse(raw) as DispatchRecord;
-      if (parsed.targetAgentId !== targetAgentId) continue;
-      if (parsed.state !== "POSTED_TO_CHANNEL") continue;
-
-      if (typeof maxAgeMs === "number") {
-        const ts = Date.parse(parsed.updatedAt || parsed.createdAt || "");
-        if (!Number.isNaN(ts) && now - ts > maxAgeMs) continue;
-      }
-
-      if (!best) {
-        best = parsed;
-      } else {
-        const a = Date.parse(parsed.updatedAt || parsed.createdAt || "") || 0;
-        const b = Date.parse(best.updatedAt || best.createdAt || "") || 0;
-        if (a > b) best = parsed;
-      }
-    } catch {
-      // ignore malformed files
-    }
-  }
-  return best;
 }
 
 export interface ArmedDispatchRecord {

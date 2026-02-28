@@ -1302,3 +1302,35 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Reply instruction ("keep private") follows OpenClaw native standard: `buildAnnounceReplyInstruction` uses identical phrasing
 - Risk introduced: Low. Envelope format change could theoretically confuse agents unfamiliar with relay, but live test showed clean synthesis.
 - Rollback note: Revert Phase 2 commits on `top-down-cleanup` branch. No env var changes needed — envelope is code-only.
+
+- Date/Time: 2026-02-28
+- Author: Claude Code (Opus 4.6)
+- Change: Backlog A-E — multi-agent generalization + full agent onboarding + TOOLS.md + setup runbook.
+- Why: Remove v1 single-agent restriction, onboard all 12 relay-bound agents, update CEO documentation, create operational runbook for future sessions.
+- Evidence:
+  - **A. Multi-agent generalization:** Deleted `V1_TARGET_AGENT` constant from `types.ts`. Removed import + validation gate from `index.ts` (lines 7, 45-52). Updated description strings in `relay-dispatch-tool.ts`. Transport's existing `No channel mapping for ${agent}` error (→ RELAY_UNAVAILABLE) provides adequate rejection for unmapped agents. Test updated: "rejects unmapped target" → "unmapped target fails at transport with RELAY_UNAVAILABLE". New test: "dispatch to second agent succeeds (multi-agent)". 33/33 tests pass, typecheck + build clean.
+  - **B. Agent onboarding:** All 12 agents registered in `clawsuite-relay.conf` channel map and mention map. Gateway restarted, active. Agents: systems-eng, clo, cfo, security-eng, doctor, life-coach, trainer, biographer, pr-manager, marketing-strat, learning-architect, pa. All mention to human user ID (794579141801934879).
+  - **C. TOOLS.md updates:** Relay Bot section generalized (removed "v1: CTO only"). Added relay-bound agents list, relay vs sessions_spawn guidance. Session keys table expanded to all 12 agents. Added `sessions_history` guidance section.
+  - **D+E. Test procedures documented:** Propensity test prompt and observation commands ready. Announce suppression piggybacks on next relay dispatch.
+  - **Setup runbook:** Created `setup-runbook.md` — Discord bot creation, OpenClaw prerequisites, agent registration procedure, env vars reference, verification checklist, troubleshooting guide, current agent registry.
+- Risk introduced: Low. Multi-agent code change is deletion of restriction, not new logic. Agent config is trivially reversible. TOOLS.md changes are additive.
+- Rollback note: Revert code changes (3 source files). Reset `clawsuite-relay.conf` to single-agent map. Revert TOOLS.md to prior version.
+
+- Date/Time: 2026-02-28
+- Author: Claude Code (Opus 4.6)
+- Change: Deleted announce-filter (vestigial), code quality pass, full 12-agent system test documented.
+- Why: Announce suppression was speculative code that never fired — native completion announce doesn't trigger for relay-initiated embedded runs. Code quality pass removed additional dead code and added documentation. System test results are significant evidence for several backlog decisions.
+- Evidence:
+  - **Announce filter deleted:** Removed `src/announce-filter.ts`, `test/announce-filter.test.ts`. Cleaned up `openclaw-plugin.ts` — removed commented hook block, 5 unused resolver functions (`resolveChannelId`, `isDiscordHookContext`, `resolveRelatedSubagentMessageId`, `resolveOutboundContent`, plus `orchestratorChannelId` variable). Plugin reduced from 201→119 lines. 26/26 tests pass.
+  - **Code quality pass (earlier this session):** Deleted `RELAY_CODES.TARGET_UNMAPPED` (only consumer was removed V1 gate). Deleted `findDispatchByPostedMessageId` and `findPendingDispatchForAgent` from state.ts (exported, never imported). Added JSDoc to `relay_dispatch`, `DispatchState`, `RELAY_CODES`. Added module comments to `state.ts`, `openclaw-plugin.ts`.
+  - **Full system test (live, 2026-02-28 ~15:00 UTC):** All 12 relay-bound agents dispatched and returned successfully. Key results:
+    - Single dispatch to CLO, CFO, PA (local LLM) — all clean round trips
+    - 2-way parallel: doctor + trainer — both returned, CEO reported incrementally
+    - 2-way parallel with synthesis: life-coach + security-eng generated random numbers, CEO summed correctly
+    - **4-way parallel with complex synthesis:** PR, marketing, biographer, learning-architect each generated 20-word lists. CEO extracted 5th word from each, sorted alphabetically, reported correctly. No dropped dispatches, no correlation confusion, no context mixing.
+    - CEO naturally tracked async dispatch IDs and synthesized results without any scripted coordination infrastructure
+  - **Propensity test result (contaminated):** CEO used relay_dispatch for CLO without prompting. However, CEO was heavily primed (extensive relay development in session + self-edited TOOLS.md listing all agents before asked). CEO's self-reported reasoning: "persistent channel context for legal work." Not a clean propensity read — true test requires naive subjects.
+  - **Behavioral coordination finding:** CEO successfully coordinated 4 parallel async dispatches using conversational awareness alone. Scripted fan-in (backlog K) may be over-engineering. Results arrive as separate system messages; CEO tracks which dispatchIds have returned and holds synthesis until all arrive.
+  - **All-directional relay gap identified:** CTO attempting dispatch gets RELAY_UNAVAILABLE — tool registered plugin-wide but only CEO has `tools.alsoAllow: ["relay_dispatch"]`. Added to backlog (Q) and implementation plan (Phase 5).
+- Risk introduced: None. Announce filter removal is subtraction only. Documentation changes are additive.
+- Rollback note: N/A — only deletion and documentation.

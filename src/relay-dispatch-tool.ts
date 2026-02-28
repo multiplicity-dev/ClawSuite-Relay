@@ -5,7 +5,7 @@ import type { RelayTransport } from "./transport.js";
 const parameters = Type.Object({
   targetAgentId: Type.String({
     description:
-      "The subagent to dispatch to. Currently only 'systems-eng' is supported in v1."
+      "The relay-bound agent to dispatch to (must have a channel mapping configured)."
   }),
   task: Type.String({
     description:
@@ -32,11 +32,10 @@ export function createRelayDispatchToolFactory(transport: RelayTransport | undef
       name: "relay_dispatch",
       label: "Relay Dispatch",
       description:
-        "Dispatch a task to a subagent via the relay channel (Discord). " +
-        "The task is posted to the subagent's dedicated channel with a mention, " +
-        "and the subagent's response is automatically captured and forwarded back. " +
-        "Use this instead of direct delegation for systems-eng tasks that benefit from " +
-        "persistent channel context and visible prompt/response audit trails.",
+        "Dispatch a task to a relay-bound agent via their dedicated Discord channel. " +
+        "The task is posted with a mention, and the agent's response is automatically " +
+        "captured and forwarded back. Use this for relay-bound agent tasks that benefit " +
+        "from persistent channel context and visible prompt/response audit trails.",
       parameters,
 
       async execute(
