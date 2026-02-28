@@ -226,46 +226,52 @@ export default function register(api: PluginApi) {
     }
   }
 
-  // Capture subagent replies from Discord inbound messages (fallback path for external bots).
-  api.on("message_received", async (event, ctx) => {
-    if (!isDiscordHookContext(event, ctx)) return;
-    if (!relayEnabled) return;
+  // Fallback capture via Discord inbound messages. Gated behind env flag —
+  // llm_output → gateway injection is the primary delivery path. When active,
+  // this forwards via DiscordForwardTransport (posts to #general), which burns
+  // CEO tokens even for non-relay messages that happen to match a dispatch.
+  const useMessageReceivedCapture = process.env.CLAWSUITE_RELAY_USE_MESSAGE_RECEIVED_CAPTURE === "1";
+  if (useMessageReceivedCapture) {
+    api.on("message_received", async (event, ctx) => {
+      if (!isDiscordHookContext(event, ctx)) return;
+      if (!relayEnabled) return;
 
-    if (debugOutbound) {
-      api.logger.info?.(`clawsuite-relay: message_received ctx=${JSON.stringify({ channelId: ctx?.channelId, conversationId: ctx?.conversationId, eventChannel: event?.channel, metaChannel: event?.metadata?.channel, metaProvider: event?.metadata?.provider })}`);
-    }
-
-    const channelId = resolveChannelId(event, ctx);
-    const messageId = resolveMessageId(event);
-    const content = asString(event?.content) ?? "";
-    if (!channelId || !messageId || !content) return;
-
-    // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
-    const authorId = resolveAuthorId(event);
-    if (relayBotUserId && authorId === relayBotUserId) return;
-    if (isRelayMachinery(content)) return;
-
-    try {
-      const result = await captureSubagentResponse(
-        {
-          channelId,
-          messageId,
-          content,
-          referencedMessageId: resolveReferencedMessageId(event)
-        },
-        { forwardTransport }
-      );
-
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: captured dispatch ${result.dispatchId}`);
+      if (debugOutbound) {
+        api.logger.info?.(`clawsuite-relay: message_received ctx=${JSON.stringify({ channelId: ctx?.channelId, conversationId: ctx?.conversationId, eventChannel: event?.channel, metaChannel: event?.metadata?.channel, metaProvider: event?.metadata?.provider })}`);
       }
-      if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: capture failed for dispatch ${result.dispatchId}`);
+
+      const channelId = resolveChannelId(event, ctx);
+      const messageId = resolveMessageId(event);
+      const content = asString(event?.content) ?? "";
+      if (!channelId || !messageId || !content) return;
+
+      // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
+      const authorId = resolveAuthorId(event);
+      if (relayBotUserId && authorId === relayBotUserId) return;
+      if (isRelayMachinery(content)) return;
+
+      try {
+        const result = await captureSubagentResponse(
+          {
+            channelId,
+            messageId,
+            content,
+            referencedMessageId: resolveReferencedMessageId(event)
+          },
+          { forwardTransport }
+        );
+
+        if (result.status === "processed") {
+          api.logger.info?.(`clawsuite-relay: captured dispatch ${result.dispatchId}`);
+        }
+        if (result.status === "failed") {
+          api.logger.warn?.(`clawsuite-relay: capture failed for dispatch ${result.dispatchId}`);
+        }
+      } catch (err) {
+        api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
       }
-    } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
-    }
-  });
+    });
+  }
 
   // Fallback capture path (agent_end): extracts content from the full message
   // array. Gated behind CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1.

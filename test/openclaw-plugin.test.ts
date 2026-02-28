@@ -13,7 +13,7 @@ process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
-const { saveDispatch, loadDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
+const { saveDispatch, loadDispatch, updateDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
@@ -34,7 +34,8 @@ test("registers hooks and relay_dispatch tool factory", () => {
   const { api, hooks, tools } = createMockApi();
   register(api);
 
-  assert.equal(typeof hooks.message_received, "function");
+  // message_received is only registered when CLAWSUITE_RELAY_USE_MESSAGE_RECEIVED_CAPTURE=1
+  assert.equal(hooks.message_received, undefined);
   assert.equal(typeof hooks.message_sending, "function");
   assert.equal(typeof hooks.llm_output, "function");
   // agent_end is only registered when CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1
@@ -43,30 +44,6 @@ test("registers hooks and relay_dispatch tool factory", () => {
   assert.equal(tools.length, 1);
   // Tool is registered as a factory (function), not a static tool
   assert.equal(typeof tools[0].tool, "function");
-});
-
-test("message_received is no-op for non-discord channel", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const result = await hooks.message_received(
-    { content: "ignored", metadata: { channelId: "systems-eng-channel", messageId: "x" } },
-    { channelId: "slack", conversationId: "systems-eng-channel" }
-  );
-
-  assert.equal(result, undefined);
-});
-
-test("message_received bails when content missing", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const result = await hooks.message_received(
-    { content: "", metadata: { channelId: "systems-eng-channel", messageId: "x2" } },
-    { channelId: "discord", conversationId: "systems-eng-channel" }
-  );
-
-  assert.equal(result, undefined);
 });
 
 test("message_sending cancels transient announce when correlated dispatch exists", async () => {
@@ -78,18 +55,11 @@ test("message_sending cancels transient announce when correlated dispatch exists
     { transport: { async postToChannel() { return { messageId: "post-plugin-1" }; } } }
   );
 
-  // Move to suppressible state by simulating capture+forward via direct state path:
-  await hooks.message_received(
-    {
-      content: "done",
-      metadata: {
-        channelId: "systems-eng-channel",
-        messageId: "sub-plugin-1",
-        referencedMessageId: "post-plugin-1"
-      }
-    },
-    { channelId: "discord", conversationId: "systems-eng-channel" }
-  );
+  // Move dispatch to suppressible state via direct state update
+  // (message_received is gated behind env flag and not active here).
+  const saved = await loadDispatch(dispatch.dispatchId!);
+  assert.ok(saved);
+  await updateDispatch({ ...saved, state: "COMPLETED", subagentResponseMessageId: "sub-plugin-1" });
 
   const result = await hooks.message_sending(
     {
