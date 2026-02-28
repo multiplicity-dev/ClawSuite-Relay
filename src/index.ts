@@ -12,6 +12,7 @@ import {
 
 export interface RelayDispatchDeps {
   transport?: RelayTransport;
+  orchestratorSessionKey?: string;
 }
 
 function invalid(message: string): RelayDispatchResponse {
@@ -109,7 +110,7 @@ export async function relay_dispatch(
       state: "POSTED_TO_CHANNEL",
       postedMessageId: post.messageId
     });
-    await setArmedDispatch(request.targetAgentId, dispatchId);
+    await setArmedDispatch(request.targetAgentId, dispatchId, deps.orchestratorSessionKey);
 
     logRelay("dispatch.posted", {
       dispatchId,

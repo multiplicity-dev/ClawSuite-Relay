@@ -1,8 +1,9 @@
 import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
-import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
+import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
 import { clearArmedDispatch, getArmedDispatch } from "./state.js";
+import { GatewayForwardTransport } from "./transport-gateway.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -192,8 +193,10 @@ export default function register(api: PluginApi) {
     // channel map parsing handled by transportFromEnv; no-op here
   }
 
-  // Register relay_dispatch as a tool the orchestrator can call.
-  api.registerTool(createRelayDispatchTool(relayTransport));
+  // Register relay_dispatch as a tool factory — the factory receives
+  // OpenClawPluginToolContext (including the orchestrator's sessionKey)
+  // so we can store it in the armed dispatch for later internal delivery.
+  api.registerTool(createRelayDispatchToolFactory(relayTransport));
 
   api.logger.info?.(`clawsuite-relay: reverse channel map: ${JSON.stringify(reverseChannelMap)}`);
 
@@ -264,36 +267,125 @@ export default function register(api: PluginApi) {
     }
   });
 
-  // Primary capture path: agent_end fires once per agent turn with the full
-  // message array. Extracts ALL session content (tool results + assistant text),
-  // not just the final Discord-visible response.
-  api.on("agent_end", async (event, ctx) => {
+  // Fallback capture path: agent_end extracts content from the full message
+  // array. Gated behind env flag — llm_output is the primary path.
+  const useAgentEndFallback = process.env.CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK === "1";
+  if (useAgentEndFallback) {
+    api.on("agent_end", async (event, ctx) => {
+      if (!relayEnabled) return;
+      const targetAgentId = asString(ctx?.agentId);
+      if (!targetAgentId) return;
+      if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
+
+      const armedDispatchId = await getArmedDispatchId(targetAgentId);
+      if (!armedDispatchId) return;
+
+      const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
+      const content = extractCurrentTurnContent(msgs);
+      if (!content) return;
+
+      try {
+        const result = await captureOutboundResponse(
+          { targetAgentId, content, dispatchId: armedDispatchId },
+          { forwardTransport }
+        );
+        if (result.status === "processed") {
+          api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId} content_len=${content.length}`);
+          await disarmDispatch(targetAgentId, result.dispatchId);
+        }
+        if (result.status === "failed") {
+          api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
+        }
+      } catch (err) {
+        api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
+      }
+    });
+  }
+
+  // Primary capture path: llm_output fires once per agent run (after agent_end)
+  // with pre-extracted assistantTexts[]. We take the LAST entry only, matching
+  // what the completion announce delivers to the orchestrator.
+  //
+  // Dual delivery:
+  //   Path (a): Discord forward via captureOutboundResponse (channel-visible)
+  //   Path (b): Gateway injection via GatewayForwardTransport (internal session)
+  api.on("llm_output", async (event, ctx) => {
     if (!relayEnabled) return;
     const targetAgentId = asString(ctx?.agentId);
     if (!targetAgentId) return;
     if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
 
-    const armedDispatchId = await getArmedDispatchId(targetAgentId);
-    if (!armedDispatchId) return;
+    const armed = await getArmedDispatch(targetAgentId);
+    if (!armed) return;
 
-    const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
-    const content = extractCurrentTurnContent(msgs);
-    if (!content) return;
+    // TTL check
+    const ts = Date.parse(armed.armedAt || "");
+    if (!Number.isNaN(ts) && Date.now() - ts > armTtlMs) {
+      await clearArmedDispatch(targetAgentId);
+      return;
+    }
+
+    const armedDispatchId = armed.dispatchId;
+
+    const texts = Array.isArray((event as any)?.assistantTexts)
+      ? ((event as any).assistantTexts as string[])
+      : [];
+    const lastText = texts.length > 0 ? texts[texts.length - 1] : "";
+    if (!lastText?.trim()) return;
+
+    api.logger.info?.(
+      `clawsuite-relay: llm_output fired for ${targetAgentId} dispatch=${armedDispatchId} texts=${texts.length} lastLen=${lastText.length}`
+    );
 
     try {
-      const result = await captureOutboundResponse(
-        { targetAgentId, content, dispatchId: armedDispatchId },
+      // Path (a): Discord forward (existing channel-visible delivery)
+      const discordResult = await captureOutboundResponse(
+        { targetAgentId, content: lastText, dispatchId: armedDispatchId },
         { forwardTransport }
       );
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId} content_len=${content.length}`);
-        await disarmDispatch(targetAgentId, result.dispatchId);
+
+      if (discordResult.status === "processed") {
+        api.logger.info?.(
+          `clawsuite-relay: llm_output discord forward dispatch=${discordResult.dispatchId} len=${lastText.length}`
+        );
       }
-      if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
+      if (discordResult.status === "failed") {
+        api.logger.warn?.(
+          `clawsuite-relay: llm_output discord forward failed dispatch=${discordResult.dispatchId}`
+        );
       }
+
+      // Path (b): Gateway internal delivery to orchestrator session
+      if (armed.orchestratorSessionKey) {
+        try {
+          const gatewayTransport = new GatewayForwardTransport({
+            orchestratorSessionKey: armed.orchestratorSessionKey
+          });
+          const gwResult = await gatewayTransport.forwardToOrchestrator({
+            dispatchId: armedDispatchId,
+            targetAgentId,
+            subagentMessageId: discordResult.dispatchId ?? armedDispatchId,
+            content: lastText
+          });
+          api.logger.info?.(
+            `clawsuite-relay: llm_output gateway delivery dispatch=${armedDispatchId} id=${gwResult.messageId}`
+          );
+        } catch (gwErr) {
+          api.logger.warn?.(
+            `clawsuite-relay: llm_output gateway delivery failed dispatch=${armedDispatchId} (${String(gwErr)})`
+          );
+        }
+      } else {
+        api.logger.warn?.(
+          `clawsuite-relay: llm_output no orchestratorSessionKey for dispatch=${armedDispatchId}, skipping gateway delivery`
+        );
+      }
+
+      await disarmDispatch(targetAgentId, armedDispatchId);
     } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
+      api.logger.warn?.(
+        `clawsuite-relay: llm_output capture error (${String(err)})`
+      );
     }
   });
 
