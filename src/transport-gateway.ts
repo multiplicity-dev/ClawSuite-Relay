@@ -9,17 +9,26 @@ export interface GatewayForwardConfig {
 }
 
 export function buildRelayTriggerMessage(request: ForwardRequest): string {
-  return [
+  const lines = [
     `[System Message] [relay-dispatch: ${request.dispatchId}] Relay task for ${request.targetAgentId} completed.`,
     "",
     "Result:",
     request.content,
     "",
     `[relay_dispatch_id:${request.dispatchId}]`,
-    `[relay_subagent_message_id:${request.subagentMessageId}]`,
+    `[relay_subagent_message_id:${request.subagentMessageId}]`
+  ];
+
+  if (request.subagentSessionKey) {
+    lines.push(`[relay_subagent_session_key:${request.subagentSessionKey}]`);
+  }
+
+  lines.push(
     "",
     "Reply based on the result above. If multiple relay tasks are outstanding, wait for all to complete before synthesizing."
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 /**
@@ -52,7 +61,7 @@ export class GatewayForwardTransport implements ForwardTransport {
     const params = JSON.stringify({
       sessionKey: this.cfg.orchestratorSessionKey,
       message: triggerMessage,
-      deliver: false,
+      deliver: true,
       idempotencyKey: deliveryId
     });
 

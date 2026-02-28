@@ -248,15 +248,17 @@ function sanitizeTextContent(text) {
 | Sanitization | `sanitizeTextContent` (thinking tags, tool markers, minimax XML) | None |
 | String vs array | Array-only in `extractAssistantText`; string fallback in caller | Both in single function |
 
-### Alignment actions
+### Alignment actions — RESOLVED (2026-02-28)
 
-1. **Match `{type: "text"}` filter** — OpenClaw filters for `block.type === "text"` specifically. The relay's looser extraction may pick up unintended content or miss structured content.
+All alignment actions below were addressed by switching to `llm_output` hook with `assistantTexts[last]`:
 
-2. **Consider `llm_output` hook** — Exposes `assistantTexts: string[]` directly, before channel processing. This is the most direct path to assistant text. Could be used alongside or instead of `agent_end`/`before_message_write`.
+1. ~~**Match `{type: "text"}` filter**~~ — Resolved: `assistantTexts` entries are pre-extracted from `{type: "text"}` blocks by `extractAssistantText` → `extractTextFromChatContent`, which filters for `block.type === "text"` at source.
 
-3. **Apply sanitization** — Strip thinking tags and tool call markers to match OpenClaw's native cleanup.
+2. ~~**Consider `llm_output` hook**~~ — Implemented: primary capture path in `openclaw-plugin.ts`.
 
-4. **Consider `chat.history` API** — If hook data is unreliable, call `chat.history` directly as `readLatestSubagentOutput` does.
+3. ~~**Apply sanitization**~~ — Resolved: `pushAssistantText` receives text already processed through `stripBlockTags` (thinking tokens) and `sanitizeTextContent` (tool call markers, minimax XML). No additional sanitization needed.
+
+4. ~~**Consider `chat.history` API**~~ — Not needed: `llm_output` provides content-equivalent data to what `readLatestSubagentOutput` extracts from `chat.history`.
 
 ---
 
@@ -303,6 +305,10 @@ If `llm_output` is not viable for any reason, reproduce the exact 09:10 conditio
 GPT-5.3's forensic diagnostics (`summarizeCurrentTurn`) should clarify what's actually in the `agent_end` messages array. If `assistantTexts` from `llm_output` differs from what `agent_end` messages contain, that confirms the data source is the issue, not the extraction logic.
 
 ---
+
+## Resolution: content parity confirmed (2026-02-28)
+
+Source code tracing confirmed that `assistantTexts[last]` is content-equivalent to what `sessions_spawn`'s completion announce delivers to the orchestrator. Thinking tokens are stripped at every level (`stripBlockTags`, `sanitizeTextContent`). There is no provider-specific gating — Discord and `sessions_spawn` contexts produce identical content. The relay's `llm_output` → `assistantTexts[last]` → gateway injection path delivers the same payload scope as native `sessions_spawn`. See `layer-disambiguation.md` section "Source code verification: `assistantTexts` content parity" for the full trace.
 
 ## Disambiguation: The three information layers (2026-02-28)
 

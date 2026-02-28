@@ -234,6 +234,56 @@ api.on("llm_output", async (event, ctx) => {
 
 ---
 
+## Source code verification: `assistantTexts` content parity (2026-02-28)
+
+### Investigation
+
+After live testing showed `assistantTexts` containing only the final visible text (not thinking/reasoning), a thorough source code trace was conducted to determine whether this is a relay-specific limitation or inherent to OpenClaw's design.
+
+### Findings
+
+**1. Thinking tokens are stripped at every level.**
+
+`pushAssistantText(text)` (line 77531) receives text that has already been processed through `stripBlockTags()` (line 77716), which removes `<thinking>`, `<thought>`, `<antthinking>`, and `<final>` tags via regex (`THINKING_TAG_SCAN_RE`, line 77414). Additionally, `extractAssistantText` (line 4418) applies `sanitizeTextContent` (line 4414) which calls `stripThinkingTagsFromText`. The native completion announce path (`readLatestSubagentOutput` → `readLatestAssistantReply` → `extractAssistantText`) applies the same sanitization.
+
+**Result:** Neither `assistantTexts` nor the native completion announce ever contain thinking tokens.
+
+**2. `sessions_spawn` delivers the same content scope as the relay.**
+
+The completion announce's `findings` field comes from `readLatestSubagentOutput` (line 73117), which walks `chat.history` backward and extracts text from the last `role: "assistant"` message using `extractAssistantText`. This function filters for `{type: "text"}` content blocks and applies `sanitizeTextContent` — producing exactly the same content scope as `assistantTexts[last]`.
+
+**Result:** The relay's `assistantTexts[last]` is content-equivalent to what `sessions_spawn`'s completion announce delivers. There is no "richer content" that the relay fails to capture.
+
+**3. No provider-specific gating on text accumulation.**
+
+`pushAssistantText`, `finalizeAssistantTexts`, and `extractAssistantText` contain no checks for `provider`, `channel`, `discord`, or `spawnMode`. The text capture pipeline is provider-agnostic. Routing differs (where the message goes), but content scope does not (what text is collected).
+
+**Result:** Discord-context and `sessions_spawn`-context subagents produce identical `assistantTexts` arrays for the same model output.
+
+**4. `lastAssistant` contains thinking tokens but the native path strips them.**
+
+The `llm_output` hook event includes `lastAssistant` (the full structured assistant message), which does contain `content[].thinking` blocks. However, the native `sessions_spawn` path strips these via `sanitizeTextContent` before delivering to the orchestrator. The relay could theoretically extract thinking from `lastAssistant.content` and deliver more than native — but this would be incorrect behavior, not a feature.
+
+### Conclusion
+
+**This is NOT a limitation of ClawSuite-Relay.** The relay delivers content-equivalent payloads to what `sessions_spawn` natively provides. The perceived limitation from the discriminating test (`texts=1 lastLen=22`) reflects correct behavior — the orchestrator is supposed to receive only the final visible text, not intermediate reasoning.
+
+The orchestrator's ability to access richer content (via `sessions_history`) depends on having the subagent's `sessionKey`, which the relay now includes as metadata in the trigger message (`[relay_subagent_session_key:...]`). Whether the orchestrator should automatically call `sessions_history` is a behavioral question outside the relay's scope.
+
+### Key source references for this verification
+
+| Function | File | Line | Finding |
+|---|---|---|---|
+| `pushAssistantText` | pi-embedded | 77531 | Receives already-stripped text |
+| `stripBlockTags` | pi-embedded | 77716 | Removes thinking tags before accumulation |
+| `THINKING_TAG_SCAN_RE` | pi-embedded | 77414 | `/<\s*(\/?)\s*(?:think(?:ing)?|thought|antthinking)\s*>/gi` |
+| `sanitizeTextContent` | pi-embedded | 4414 | Strips thinking + tool call text + minimax XML |
+| `extractAssistantText` | pi-embedded | 4418 | Filters `{type: "text"}` blocks + sanitizes |
+| `readLatestSubagentOutput` | subagent-registry | 73117 | Native announce text — same extraction chain |
+| `finalizeAssistantTexts` | pi-embedded | 77537 | No provider/channel checks |
+
+---
+
 ## Evidence base
 
 ### Verified working state (2026-02-27, 09:10 CET)

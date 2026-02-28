@@ -3,6 +3,7 @@ export interface ForwardRequest {
   targetAgentId: string;
   subagentMessageId: string;
   content: string;
+  subagentSessionKey?: string;
 }
 
 export interface ForwardResult {

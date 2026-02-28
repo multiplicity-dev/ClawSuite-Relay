@@ -349,7 +349,8 @@ export default function register(api: PluginApi) {
           dispatchId: armedDispatchId,
           targetAgentId,
           subagentMessageId: armedDispatchId,
-          content: lastText
+          content: lastText,
+          subagentSessionKey: asString(ctx?.sessionKey)
         });
         api.logger.info?.(
           `clawsuite-relay: llm_output gateway delivery dispatch=${armedDispatchId} id=${gwResult.messageId}`
