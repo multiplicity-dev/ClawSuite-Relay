@@ -23,13 +23,14 @@ export function buildRelayTriggerMessage(request: ForwardRequest): string {
 }
 
 /**
- * Delivers subagent results to the orchestrator's session via the
- * `openclaw agent` CLI, which calls callGateway({ method: "agent" })
+ * Delivers subagent results to the orchestrator's session via
+ * `openclaw gateway call agent`, which calls callGateway({ method: "agent" })
  * internally. This matches the delivery path used by
  * sendSubagentAnnounceDirectly in normal sessions_spawn flows.
  *
- * callGateway is not directly importable (bundled internally in the
- * OpenClaw dist), so we use the CLI as the transport layer.
+ * Uses `gateway call` (raw RPC) instead of `openclaw agent` because
+ * `agent --session-id` expects a UUID, not a session key. The raw RPC
+ * call passes sessionKey in params directly, matching the native announce path.
  */
 export class GatewayForwardTransport implements ForwardTransport {
   constructor(private readonly cfg: GatewayForwardConfig) {}
@@ -46,19 +47,27 @@ export class GatewayForwardTransport implements ForwardTransport {
       contentLength: request.content.length
     });
 
-    const timeoutMs = this.cfg.timeoutMs ?? 30_000;
+    const timeoutMs = this.cfg.timeoutMs ?? 60_000;
+
+    const params = JSON.stringify({
+      sessionKey: this.cfg.orchestratorSessionKey,
+      message: triggerMessage,
+      deliver: false,
+      idempotencyKey: deliveryId
+    });
 
     return new Promise<ForwardResult>((resolve, reject) => {
       const args = [
-        "agent",
-        "--session-id", this.cfg.orchestratorSessionKey,
-        "--message", triggerMessage,
+        "gateway", "call", "agent",
+        "--params", params,
+        "--expect-final",
+        "--timeout", String(timeoutMs),
         "--json"
       ];
 
       const proc = execFile("openclaw", args, {
-        timeout: timeoutMs,
-        maxBuffer: 1024 * 1024,
+        timeout: timeoutMs + 5_000,
+        maxBuffer: 2 * 1024 * 1024,
         env: { ...process.env }
       }, (error, stdout, stderr) => {
         if (error) {

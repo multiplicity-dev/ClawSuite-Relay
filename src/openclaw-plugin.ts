@@ -2,7 +2,7 @@ import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
 import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
 import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
 import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
-import { clearArmedDispatch, getArmedDispatch } from "./state.js";
+import { clearArmedDispatch, getArmedDispatch, loadDispatch, updateDispatch } from "./state.js";
 import { GatewayForwardTransport } from "./transport-gateway.js";
 
 interface PluginApi {
@@ -302,13 +302,14 @@ export default function register(api: PluginApi) {
     });
   }
 
-  // Primary capture path: llm_output fires once per agent run (after agent_end)
-  // with pre-extracted assistantTexts[]. We take the LAST entry only, matching
-  // what the completion announce delivers to the orchestrator.
+  // Primary capture + delivery path: llm_output fires once per agent run
+  // (after agent_end) with pre-extracted assistantTexts[]. We take the LAST
+  // entry only, matching what the completion announce delivers.
   //
-  // Dual delivery:
-  //   Path (a): Discord forward via captureOutboundResponse (channel-visible)
-  //   Path (b): Gateway injection via GatewayForwardTransport (internal session)
+  // Delivery is INTERNAL ONLY via gateway injection (path b). The subagent's
+  // response still posts to its own Discord channel via normal OpenClaw
+  // message_sending (path a). We do NOT mirror to #general — that was the
+  // "wrong vehicle" identified in layer-disambiguation.md.
   api.on("llm_output", async (event, ctx) => {
     if (!relayEnabled) return;
     const targetAgentId = asString(ctx?.agentId);
@@ -338,49 +339,32 @@ export default function register(api: PluginApi) {
     );
 
     try {
-      // Path (a): Discord forward (existing channel-visible delivery)
-      const discordResult = await captureOutboundResponse(
-        { targetAgentId, content: lastText, dispatchId: armedDispatchId },
-        { forwardTransport }
-      );
-
-      if (discordResult.status === "processed") {
-        api.logger.info?.(
-          `clawsuite-relay: llm_output discord forward dispatch=${discordResult.dispatchId} len=${lastText.length}`
-        );
-      }
-      if (discordResult.status === "failed") {
-        api.logger.warn?.(
-          `clawsuite-relay: llm_output discord forward failed dispatch=${discordResult.dispatchId}`
-        );
-      }
-
-      // Path (b): Gateway internal delivery to orchestrator session
+      // Path (b): Gateway internal delivery to orchestrator session.
+      // This is the sole delivery mechanism — no Discord mirror.
       if (armed.orchestratorSessionKey) {
-        try {
-          const gatewayTransport = new GatewayForwardTransport({
-            orchestratorSessionKey: armed.orchestratorSessionKey
-          });
-          const gwResult = await gatewayTransport.forwardToOrchestrator({
-            dispatchId: armedDispatchId,
-            targetAgentId,
-            subagentMessageId: discordResult.dispatchId ?? armedDispatchId,
-            content: lastText
-          });
-          api.logger.info?.(
-            `clawsuite-relay: llm_output gateway delivery dispatch=${armedDispatchId} id=${gwResult.messageId}`
-          );
-        } catch (gwErr) {
-          api.logger.warn?.(
-            `clawsuite-relay: llm_output gateway delivery failed dispatch=${armedDispatchId} (${String(gwErr)})`
-          );
-        }
+        const gatewayTransport = new GatewayForwardTransport({
+          orchestratorSessionKey: armed.orchestratorSessionKey
+        });
+        const gwResult = await gatewayTransport.forwardToOrchestrator({
+          dispatchId: armedDispatchId,
+          targetAgentId,
+          subagentMessageId: armedDispatchId,
+          content: lastText
+        });
+        api.logger.info?.(
+          `clawsuite-relay: llm_output gateway delivery dispatch=${armedDispatchId} id=${gwResult.messageId}`
+        );
       } else {
         api.logger.warn?.(
           `clawsuite-relay: llm_output no orchestratorSessionKey for dispatch=${armedDispatchId}, skipping gateway delivery`
         );
       }
 
+      // Update dispatch state to completed and disarm.
+      const dispatch = await loadDispatch(armedDispatchId);
+      if (dispatch && (dispatch.state === "POSTED_TO_CHANNEL" || dispatch.state === "SUBAGENT_RESPONDED")) {
+        await updateDispatch({ ...dispatch, state: "COMPLETED" });
+      }
       await disarmDispatch(targetAgentId, armedDispatchId);
     } catch (err) {
       api.logger.warn?.(
@@ -404,10 +388,14 @@ export default function register(api: PluginApi) {
       );
     }
 
-    // Outbound capture: if this message is going to a subagent channel with
-    // a pending dispatch, capture the response and forward to orchestrator.
-    // We do NOT cancel — the subagent's message still posts normally.
-    if (relayEnabled) {
+    // Outbound capture: DISABLED for relay targets. Delivery is handled by
+    // llm_output → gateway injection (path b). The message_sending hook only
+    // handles announce suppression now. The subagent's message still posts to
+    // its own channel normally — we just don't mirror it to #general.
+    //
+    // If the agent_end fallback is active, outbound capture is re-enabled
+    // as that path needs the Discord forward.
+    if (relayEnabled && useAgentEndFallback) {
       const targetAgentId = reverseChannelMap[channelId];
       if (targetAgentId) {
         if (!content) {
