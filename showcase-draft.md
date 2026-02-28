@@ -74,11 +74,15 @@ It turned out the answer *was* correct. `assistantTexts[last]` is the final visi
 
 ## What the Relay Actually Achieves
 
-The relay changes three things, none of which are about delivering "more data":
+OpenClaw's core value proposition is persistence — agents remember their conversations. But the irony is that inter-agent delegation, one of the most important orchestrator workflows, is the one place where persistence doesn't apply. `sessions_spawn` creates throwaway sessions. The subagent forgets. The orchestrator can't audit. The human sees only the synthesis.
+
+The relay fixes this. And it does so with zero additional token overhead — the capture and delivery pipeline is entirely scripted (hooks, file I/O, CLI calls). The models process the same messages they would natively. The relay changes the routing, not the workload.
+
+Three things change:
+
+**Persistence.** The subagent works in its main channel session, not a throwaway. When you talk to the CTO directly later, it remembers the orchestrator-dispatched work. The "subagent amnesia" problem disappears. Context accumulates across dispatches.
 
 **Transparency.** The president can read any subagent channel and see exactly what the orchestrator asked and what the subagent answered. No parsing JSONL files. No trusting the orchestrator's synthesis blindly.
-
-**Continuity.** The subagent works in its main channel session, not a throwaway. When you talk to the CTO directly later, it remembers the orchestrator-dispatched work. The "subagent amnesia" problem disappears.
 
 **Context access.** Because the relay operates on the main session, the orchestrator can call `sessions_history` with the subagent's session key and a small `limit` to see recent working — not just the current task, but accumulated context from prior dispatches and direct conversations. This is arguably *more* valuable than native `sessions_spawn`, where each transient session starts from zero.
 

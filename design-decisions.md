@@ -246,6 +246,54 @@ See `envelope-research.md` for the full survey, recommended structure, and seria
 
 ---
 
+## §11. Value Proposition: Persistence Without Token Overhead
+
+### The gap in native OpenClaw
+
+OpenClaw's core value proposition is persistent agent sessions — agents remember prior conversations and accumulate context. But `sessions_spawn` (the native delegation mechanism) creates **transient** sessions. The subagent works in a throwaway context that is discarded after the task completes. The orchestrator receives a summary. The human sees the orchestrator's synthesis. Nobody can audit the exchange, and the subagent retains nothing.
+
+This means inter-agent delegation — a core orchestrator use case — is the one place where OpenClaw's persistence guarantee doesn't apply.
+
+### What the relay provides
+
+The relay routes delegation through the subagent's main channel session. The subagent works in its persistent context, accumulating knowledge across dispatches. The orchestrator receives the same content scope as native `sessions_spawn` (see §2). The human can read the subagent's channel to see exactly what was asked and answered.
+
+Three persistence gains, all without additional token overhead:
+
+1. **Subagent persistence.** The subagent remembers orchestrator-dispatched work. When you talk to the CTO directly later, it has the context from prior relay dispatches — not just its own conversations.
+
+2. **Audit trail.** Every dispatch prompt and response is visible in the subagent's Discord channel. No JSONL parsing. No trusting the orchestrator's synthesis blindly.
+
+3. **Cross-dispatch context.** Via `sessions_history` with a small `limit`, the orchestrator can access the subagent's recent working across multiple dispatches and direct conversations — something `sessions_spawn`'s clean transient sessions can never provide.
+
+### Token overhead: zero in current implementation
+
+The capture and delivery pipeline is entirely scripted — no model invocations:
+
+| Step | Mechanism | Model tokens |
+|---|---|---|
+| Outbound post to subagent channel | Plugin code → Discord REST API | None |
+| Capture subagent response | `llm_output` hook reads `assistantTexts[]` | None |
+| Gateway injection to orchestrator | `execFile("openclaw", ["gateway", "call", "agent"])` | None |
+| State management (arming, dispatch records) | JSON file I/O | None |
+
+The models process the same messages they would in native `sessions_spawn`: the orchestrator composes a task prompt, the subagent processes it, the orchestrator synthesizes the result. The relay changes the routing, not the workload.
+
+**Qualification:** The subagent's main session carries accumulated context, so its input token count per request may be marginally higher than a fresh transient session. This is the feature (persistence), not overhead — and follows the same growth curve as any persistent channel conversation.
+
+### Known trade-offs
+
+| Trade-off | Impact | Mitigation |
+|---|---|---|
+| **Maintenance surface** | Additional plugin code, second Discord bot, systemd config | Modular design; plugin can be disabled without affecting OpenClaw |
+| **Security exposure** | Second bot token with Send Messages + Read History permissions | Minimal permissions; bot only accesses mapped channels |
+| **Latency** | ~200-500ms per dispatch (Discord API post + gateway CLI return) | Negligible for task delegation use case |
+| **Hook API dependency** | Relay depends on OpenClaw's plugin hook system (`llm_output`, `message_sending`) | Hook interface is stable; fallback paths exist behind env flags |
+| **User may not want history** | All relay dispatches persist in channel history | This is the feature; users who prefer transient delegation can use `sessions_spawn` directly for unmapped agents |
+
+---
+
 ## Changelog
 - 2026-02-28: Initial document. Sections 1-9 covering surfaces model, content parity, prompting, trigger message, multi-message handling, session key semantics, gateway injection, factory pattern, callGateway import.
 - 2026-02-28: Added §10 — message envelope design direction, referencing envelope-research.md.
+- 2026-02-28: Added §11 — value proposition: persistence without token overhead.

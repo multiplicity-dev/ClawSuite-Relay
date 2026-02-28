@@ -1,8 +1,8 @@
 # ClawSuite-Relay
 
-Relay-first orchestration bridge for OpenClaw.
+Persistent inter-agent delegation for OpenClaw.
 
-Routes orchestrator delegation into subagent channels for transparent prompt/response visibility, persistent subagent context, and fail-loud reliability.
+OpenClaw gives agents persistent sessions — but `sessions_spawn` creates transient ones. The subagent forgets, the orchestrator can't audit, and the human sees only the synthesis. ClawSuite-Relay routes delegation through the subagent's main channel session, making inter-agent work persistent, transparent, and auditable — with zero additional token overhead.
 
 ## Project docs
 - `relay-bot-plan.md` — architecture and rationale
