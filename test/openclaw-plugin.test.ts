@@ -30,17 +30,19 @@ function createMockApi() {
   return { api, hooks, tools };
 }
 
-test("registers hooks and relay_dispatch tool", () => {
+test("registers hooks and relay_dispatch tool factory", () => {
   const { api, hooks, tools } = createMockApi();
   register(api);
 
   assert.equal(typeof hooks.message_received, "function");
   assert.equal(typeof hooks.message_sending, "function");
-  assert.equal(typeof hooks.agent_end, "function");
-  assert.equal(hooks.before_message_write, undefined, "before_message_write removed — only captures Discord-visible text, not full response");
+  assert.equal(typeof hooks.llm_output, "function");
+  // agent_end is only registered when CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1
+  assert.equal(hooks.agent_end, undefined);
+  assert.equal(hooks.before_message_write, undefined);
   assert.equal(tools.length, 1);
-  assert.equal(tools[0].tool.name, "relay_dispatch");
-  assert.equal(typeof tools[0].tool.execute, "function");
+  // Tool is registered as a factory (function), not a static tool
+  assert.equal(typeof tools[0].tool, "function");
 });
 
 test("message_received is no-op for non-discord channel", async () => {
@@ -100,7 +102,7 @@ test("message_sending cancels transient announce when correlated dispatch exists
   assert.deepEqual(result, { cancel: true });
 });
 
-test("agent_end captures only after dispatch is armed", async () => {
+test("llm_output captures only after dispatch is armed", async () => {
   const dispatchId = "00000000-0000-1000-8000-000000000077";
   await saveDispatch({
     dispatchId,
@@ -119,33 +121,36 @@ test("agent_end captures only after dispatch is armed", async () => {
   await clearArmedDispatch("systems-eng");
 
   // Without arming, should no-op.
-  const noArm = await hooks.agent_end(
-    { messages: [{ role: "assistant", content: "here is my analysis" }] },
+  const noArm = await hooks.llm_output(
+    { assistantTexts: ["here is my analysis"] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
   assert.equal(noArm, undefined);
   const stillPending = await loadDispatch(dispatchId);
   assert.equal(stillPending?.state, "POSTED_TO_CHANNEL");
 
-  // Arm directly via persistent state (relay_dispatch now sets this in runtime).
-  await setArmedDispatch("systems-eng", dispatchId);
+  // Arm with orchestrator session key — gateway delivery will fail in test
+  // (no real gateway), but the dispatch state should still update.
+  await setArmedDispatch("systems-eng", dispatchId, "agent:ceo:test:session");
 
-  const armed = await hooks.agent_end(
-    { messages: [{ role: "assistant", content: "here is my analysis" }] },
+  const armed = await hooks.llm_output(
+    { assistantTexts: ["here is my analysis"] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
 
   assert.equal(armed, undefined);
+  // Dispatch may be COMPLETED (if gateway call succeeds) or still
+  // POSTED_TO_CHANNEL (if gateway call fails in test env). Either way,
+  // the hook ran without throwing.
 });
 
-test("relay_dispatch tool executes dispatch with mock transport", async () => {
-  const { tools } = createMockApi();
-  // Build tool directly with a mock transport
-  const { createRelayDispatchTool } = await import("../src/relay-dispatch-tool.js");
+test("relay_dispatch tool factory produces working tool", async () => {
+  const { createRelayDispatchToolFactory } = await import("../src/relay-dispatch-tool.js");
   const mockTransport = {
     async postToChannel() { return { messageId: "tool-post-1" }; }
   };
-  const tool = createRelayDispatchTool(mockTransport);
+  const factory = createRelayDispatchToolFactory(mockTransport);
+  const tool = factory({ sessionKey: "agent:ceo:test:session", agentId: "ceo" });
 
   const result = await tool.execute("call-1", {
     targetAgentId: "systems-eng",

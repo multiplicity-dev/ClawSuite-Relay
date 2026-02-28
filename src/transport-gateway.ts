@@ -98,7 +98,7 @@ export class GatewayForwardTransport implements ForwardTransport {
       ];
 
       const proc = execFile("openclaw", args, {
-        timeout: timeoutMs + 5_000,
+        timeout: timeoutMs + 5_000,  // +5s buffer for process cleanup after gateway timeout
         maxBuffer: 2 * 1024 * 1024,
         env: { ...process.env }
       }, (error, stdout, stderr) => {

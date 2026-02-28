@@ -4,6 +4,7 @@ import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.j
 import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
 import { clearArmedDispatch, getArmedDispatch, loadDispatch, updateDispatch } from "./state.js";
 import { GatewayForwardTransport } from "./transport-gateway.js";
+import { isRelayMachinery } from "./markers.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -242,8 +243,7 @@ export default function register(api: PluginApi) {
     // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
     const authorId = resolveAuthorId(event);
     if (relayBotUserId && authorId === relayBotUserId) return;
-    if (content.includes("[relay_subagent_message_id:")) return;
-    if (content.startsWith("Subagent response received for ")) return;
+    if (isRelayMachinery(content)) return;
 
     try {
       const result = await captureSubagentResponse(
@@ -267,8 +267,13 @@ export default function register(api: PluginApi) {
     }
   });
 
-  // Fallback capture path: agent_end extracts content from the full message
-  // array. Gated behind env flag — llm_output is the primary path.
+  // Fallback capture path (agent_end): extracts content from the full message
+  // array. Gated behind CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1.
+  //
+  // Both agent_end and llm_output may fire for the same dispatch. The first
+  // to forward transitions the dispatch to COMPLETED; the second finds it
+  // already complete and returns { status: "ignored" }. Keep this disabled
+  // (default) unless llm_output is unreliable in your OpenClaw version.
   const useAgentEndFallback = process.env.CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK === "1";
   if (useAgentEndFallback) {
     api.on("agent_end", async (event, ctx) => {
@@ -396,7 +401,7 @@ export default function register(api: PluginApi) {
     //
     // If the agent_end fallback is active, outbound capture is re-enabled
     // as that path needs the Discord forward.
-    if (relayEnabled && useAgentEndFallback) {
+    if (useAgentEndFallback) {
       const targetAgentId = reverseChannelMap[channelId];
       if (targetAgentId) {
         if (!content) {

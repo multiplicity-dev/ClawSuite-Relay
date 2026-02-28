@@ -56,10 +56,9 @@ export async function updateDispatch(record: DispatchRecord) {
   });
 }
 
-export async function findDispatchByPostedMessageId(
-  postedMessageId: string
+async function findDispatchRecord(
+  predicate: (record: DispatchRecord) => boolean
 ): Promise<DispatchRecord | null> {
-  if (!postedMessageId?.trim()) return null;
   await ensureDispatchDir();
   const files = await readdir(getDispatchDir());
   for (const file of files) {
@@ -67,31 +66,26 @@ export async function findDispatchByPostedMessageId(
     try {
       const raw = await readFile(join(getDispatchDir(), file), "utf8");
       const parsed = JSON.parse(raw) as DispatchRecord;
-      if (parsed.postedMessageId === postedMessageId) return parsed;
+      if (predicate(parsed)) return parsed;
     } catch {
-      // ignore malformed/unreadable files in v1
+      // ignore malformed files
     }
   }
   return null;
 }
 
-export async function findDispatchBySubagentResponseMessageId(
+export function findDispatchByPostedMessageId(
+  postedMessageId: string
+): Promise<DispatchRecord | null> {
+  if (!postedMessageId?.trim()) return Promise.resolve(null);
+  return findDispatchRecord((r) => r.postedMessageId === postedMessageId);
+}
+
+export function findDispatchBySubagentResponseMessageId(
   subagentResponseMessageId: string
 ): Promise<DispatchRecord | null> {
-  if (!subagentResponseMessageId?.trim()) return null;
-  await ensureDispatchDir();
-  const files = await readdir(getDispatchDir());
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
-    try {
-      const raw = await readFile(join(getDispatchDir(), file), "utf8");
-      const parsed = JSON.parse(raw) as DispatchRecord;
-      if (parsed.subagentResponseMessageId === subagentResponseMessageId) return parsed;
-    } catch {
-      // ignore malformed/unreadable files in v1
-    }
-  }
-  return null;
+  if (!subagentResponseMessageId?.trim()) return Promise.resolve(null);
+  return findDispatchRecord((r) => r.subagentResponseMessageId === subagentResponseMessageId);
 }
 
 export async function findPendingDispatchForAgent(
@@ -99,10 +93,13 @@ export async function findPendingDispatchForAgent(
   opts: { maxAgeMs?: number } = {}
 ): Promise<DispatchRecord | null> {
   if (!targetAgentId?.trim()) return null;
-  await ensureDispatchDir();
-  const files = await readdir(getDispatchDir());
   const now = Date.now();
   const maxAgeMs = opts.maxAgeMs;
+
+  // Uses a manual scan (not findDispatchRecord) because we need to pick
+  // the most-recently-updated match, not just the first match.
+  await ensureDispatchDir();
+  const files = await readdir(getDispatchDir());
   let best: DispatchRecord | null = null;
 
   for (const file of files) {
@@ -126,7 +123,7 @@ export async function findPendingDispatchForAgent(
         if (a > b) best = parsed;
       }
     } catch {
-      // ignore malformed/unreadable files in v1
+      // ignore malformed files
     }
   }
   return best;
@@ -168,21 +165,9 @@ export async function clearArmedDispatch(targetAgentId: string) {
   await rm(p, { force: true });
 }
 
-export async function findDispatchByRequestId(
+export function findDispatchByRequestId(
   requestId: string
 ): Promise<DispatchRecord | null> {
-  if (!requestId?.trim()) return null;
-  await ensureDispatchDir();
-  const files = await readdir(getDispatchDir());
-  for (const file of files) {
-    if (!file.endsWith(".json")) continue;
-    try {
-      const raw = await readFile(join(getDispatchDir(), file), "utf8");
-      const parsed = JSON.parse(raw) as DispatchRecord;
-      if (parsed.requestId === requestId) return parsed;
-    } catch {
-      // ignore malformed/unreadable files in v1
-    }
-  }
-  return null;
+  if (!requestId?.trim()) return Promise.resolve(null);
+  return findDispatchRecord((r) => r.requestId === requestId);
 }

@@ -131,7 +131,7 @@ export function forwardTransportFromEnv(): DiscordForwardTransport {
 
   return new DiscordForwardTransport({
     botToken,
-    channelsByAgent: {},
+    channelsByAgent: {},  // unused by forwardToOrchestrator; required by shared config type
     orchestratorChannelId
   });
 }

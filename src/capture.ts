@@ -1,7 +1,7 @@
 import { logRelay } from "./logger.js";
 import { loadDispatch, findDispatchByPostedMessageId, findPendingDispatchForAgent, updateDispatch } from "./state.js";
 import { type ForwardTransport, UnconfiguredForwardTransport } from "./forward.js";
-import { extractRelayDispatchId } from "./markers.js";
+import { extractRelayDispatchId, isRelayMachinery } from "./markers.js";
 import type { DispatchRecord } from "./types.js";
 
 export interface SubagentMessageEvent {
@@ -25,9 +25,7 @@ function canCaptureFromState(state: DispatchRecord["state"]): boolean {
   return state === "POSTED_TO_CHANNEL" || state === "SUBAGENT_RESPONDED";
 }
 
-function isLikelyRelayEnvelope(content: string): boolean {
-  return content.includes("[relay_subagent_message_id:") || content.startsWith("Subagent response received for ");
-}
+// Use shared isRelayMachinery from markers.ts
 
 export function extractDispatchId(content: string): string | null {
   return extractRelayDispatchId(content);
@@ -56,7 +54,7 @@ export async function captureSubagentResponse(
     return { status: "ignored", dispatchId: dispatch.dispatchId, reason: `state_${dispatch.state}` };
   }
 
-  if (isLikelyRelayEnvelope(event.content)) {
+  if (isRelayMachinery(event.content)) {
     return { status: "ignored", dispatchId: dispatch.dispatchId, reason: "relay_envelope" };
   }
 

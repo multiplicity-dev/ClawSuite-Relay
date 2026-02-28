@@ -28,7 +28,6 @@ function isReplayableState(state: DispatchRecord["state"]): boolean {
   return (
     state === "POSTED_TO_CHANNEL" ||
     state === "SUBAGENT_RESPONDED" ||
-    state === "FORWARDED_TO_ORCHESTRATOR" ||
     state === "COMPLETED"
   );
 }

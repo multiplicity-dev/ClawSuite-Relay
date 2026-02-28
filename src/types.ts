@@ -17,10 +17,6 @@ export interface RelayDispatchRequest {
   targetAgentId: string;
   task: string;
   requestId?: string;
-  options?: {
-    priority?: "normal";
-    replyMode?: "auto-forward";
-  };
 }
 
 export interface RelayDispatchResponse {
@@ -35,7 +31,6 @@ export type DispatchState =
   | "CREATED"
   | "POSTED_TO_CHANNEL"
   | "SUBAGENT_RESPONDED"
-  | "FORWARDED_TO_ORCHESTRATOR"
   | "COMPLETED"
   | "FAILED";
 

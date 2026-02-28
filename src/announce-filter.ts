@@ -14,7 +14,7 @@ export interface AnnounceFilterConfig {
 }
 
 function isSuppressibleState(state: string): boolean {
-  return state === "SUBAGENT_RESPONDED" || state === "FORWARDED_TO_ORCHESTRATOR" || state === "COMPLETED";
+  return state === "SUBAGENT_RESPONDED" || state === "COMPLETED";
 }
 
 export async function shouldSuppressTransientGeneralAnnounce(
