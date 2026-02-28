@@ -4,7 +4,7 @@ import { type RelayEnvelope, serializeForDiscord } from "./envelope.js";
 interface DiscordRelayConfig {
   botToken: string;
   channelsByAgent: Record<string, string>;
-  mentionsByAgent?: Record<string, string>;
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 const DISCORD_MAX_CONTENT = 2000;
@@ -21,26 +21,48 @@ function validateSnowflake(value: string | undefined, label: string) {
 // Non-transient (400/403/404) fail immediately — zero chance of success on retry.
 const MAX_ATTEMPTS = 3;
 const SERVER_ERROR_BACKOFF_MS = 2000;
+const DEFAULT_RETRY_AFTER_MS = 2000;
+const MIN_RETRY_AFTER_MS = 500;
+const MAX_RETRY_AFTER_MS = 30000;
 const TRANSIENT_STATUS = new Set([429, 500, 502, 503]);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseRetryAfterMs(headerValue: string | null): number {
+  const seconds = Number(headerValue);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return DEFAULT_RETRY_AFTER_MS;
+  }
+  const ms = seconds * 1000;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(MIN_RETRY_AFTER_MS, ms));
+}
+
 async function postDiscordMessage(
   botToken: string,
   channelId: string,
-  content: string
+  content: string,
+  sleepFn: (ms: number) => Promise<void> = sleep
 ): Promise<{ id: string }> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bot ${botToken}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ content })
-    });
+    let response: Response;
+    try {
+      response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bot ${botToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ content })
+      });
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS) {
+        throw new Error(`Discord post failed (network): ${String(err)}`);
+      }
+      await sleepFn(SERVER_ERROR_BACKOFF_MS);
+      continue;
+    }
 
     if (response.ok) {
       return (await response.json()) as { id: string };
@@ -54,10 +76,9 @@ async function postDiscordMessage(
 
     // 429: use Discord-provided Retry-After (seconds). 5xx: fixed backoff.
     if (response.status === 429) {
-      const retryAfter = Number(response.headers.get("Retry-After") || "2");
-      await sleep(retryAfter * 1000);
+      await sleepFn(parseRetryAfterMs(response.headers.get("Retry-After")));
     } else {
-      await sleep(SERVER_ERROR_BACKOFF_MS);
+      await sleepFn(SERVER_ERROR_BACKOFF_MS);
     }
   }
 
@@ -65,7 +86,7 @@ async function postDiscordMessage(
   throw new Error("Discord post failed: retry budget exhausted");
 }
 
-export function buildRelayContent(request: RelayPostRequest, opts?: { mentionUserId?: string; sourceAgentId?: string }): string {
+export function buildRelayContent(request: RelayPostRequest, opts?: { sourceAgentId?: string }): string {
   const envelope: RelayEnvelope = {
     source: opts?.sourceAgentId ?? "relay",
     target: request.targetAgentId,
@@ -75,7 +96,7 @@ export function buildRelayContent(request: RelayPostRequest, opts?: { mentionUse
     content: request.task
   };
 
-  return serializeForDiscord(envelope, { mentionUserId: opts?.mentionUserId });
+  return serializeForDiscord(envelope);
 }
 
 /**
@@ -110,24 +131,19 @@ export class DiscordRelayTransport implements RelayTransport {
     if (!channelId) throw new Error(`No channel mapping for ${request.targetAgentId}`);
     validateSnowflake(channelId, `Discord channel id for ${request.targetAgentId}`);
 
-    const mentionUserId = this.cfg.mentionsByAgent?.[request.targetAgentId];
-    if (mentionUserId) validateSnowflake(mentionUserId, `mention user id for ${request.targetAgentId}`);
-
-    const content = buildRelayContent(request, { mentionUserId, sourceAgentId: request.sourceAgentId });
+    const content = buildRelayContent(request, { sourceAgentId: request.sourceAgentId });
 
     // Single message if it fits
     if (content.length <= DISCORD_MAX_CONTENT) {
-      const json = await postDiscordMessage(this.cfg.botToken, channelId, content);
+      const json = await postDiscordMessage(this.cfg.botToken, channelId, content, this.cfg.sleepFn);
       return { messageId: json.id };
     }
 
-    // Multi-message: split the task content, prepend mention to first chunk,
-    // append envelope footer to last chunk.
-    const mentionPrefix = mentionUserId ? `<@${mentionUserId}>\n` : "";
+    // Multi-message: split the task content and append envelope footer to last chunk.
     const footer = `\n\nfrom ${request.sourceAgentId ?? "relay"}`;
 
-    // Reserve space for mention/footer in first/last chunk
-    const firstMaxLen = DISCORD_MAX_CONTENT - mentionPrefix.length;
+    // Reserve space for footer in last chunk.
+    const firstMaxLen = DISCORD_MAX_CONTENT;
     const lastMaxLen = DISCORD_MAX_CONTENT - footer.length;
     const middleMaxLen = DISCORD_MAX_CONTENT;
 
@@ -137,10 +153,9 @@ export class DiscordRelayTransport implements RelayTransport {
     let lastMessageId = "";
     for (let i = 0; i < taskChunks.length; i++) {
       let msg = taskChunks[i];
-      if (i === 0) msg = mentionPrefix + msg;
       if (i === taskChunks.length - 1) msg = msg + footer;
 
-      const json = await postDiscordMessage(this.cfg.botToken, channelId, msg);
+      const json = await postDiscordMessage(this.cfg.botToken, channelId, msg, this.cfg.sleepFn);
       lastMessageId = json.id;
     }
 
@@ -159,7 +174,6 @@ function parseJsonEnv<T>(raw: string, envName: string): T {
 export function transportFromEnv(): DiscordRelayTransport {
   const botToken = process.env.CLAWSUITE_RELAY_BOT_TOKEN;
   const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
-  const rawMentions = process.env.CLAWSUITE_RELAY_MENTION_MAP_JSON;
 
   if (!botToken) throw new Error("Missing CLAWSUITE_RELAY_BOT_TOKEN");
   if (!rawChannels) throw new Error("Missing CLAWSUITE_RELAY_CHANNEL_MAP_JSON");
@@ -168,11 +182,5 @@ export function transportFromEnv(): DiscordRelayTransport {
     rawChannels,
     "CLAWSUITE_RELAY_CHANNEL_MAP_JSON"
   );
-  const mentionEnabled = process.env.CLAWSUITE_RELAY_MENTION_ENABLED !== "0";
-  const mentionsByAgent = mentionEnabled && rawMentions
-    ? parseJsonEnv<Record<string, string>>(rawMentions, "CLAWSUITE_RELAY_MENTION_MAP_JSON")
-    : undefined;
-
-  return new DiscordRelayTransport({ botToken, channelsByAgent, mentionsByAgent });
+  return new DiscordRelayTransport({ botToken, channelsByAgent });
 }
-

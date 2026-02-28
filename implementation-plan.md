@@ -126,11 +126,11 @@ Status: Phase 2 COMPLETE. All-directional relay wired (2026-02-28). Naive subjec
 ### Agent rollout
 - [x] **CLO (legal) channel mapping** — second relay-bound agent (2026-02-28)
 - [x] **V1_TARGET_AGENT removal** — removed single-agent restriction, transport validates against channel map (2026-02-28)
-- [x] **All 12 agents onboarded** — full channel + mention maps deployed (2026-02-28)
+- [x] **All 12 agents onboarded** — full channel maps deployed (2026-02-28)
 - [ ] **Per-agent relay configuration** — different timeout, retry, and routing policies per agent
 
 ### All-directional relay — COMPLETE (2026-02-28)
-- [x] **Any agent → any agent dispatch** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]` in `openclaw.json`. CEO added to channel + mention maps in `clawsuite-relay.conf` (was missing, caused RELAY_UNAVAILABLE). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces.
+- [x] **Any agent → any agent dispatch** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]` in `openclaw.json`. CEO added to channel map in `clawsuite-relay.conf` (was missing, caused RELAY_UNAVAILABLE). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces.
 - [x] **Dispatch topology: free-form** — all agents can dispatch to all others. No hub-and-spoke restriction. Peer collaboration enabled.
 
 ### Packaging

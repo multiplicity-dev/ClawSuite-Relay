@@ -118,7 +118,7 @@ Expected: `clawsuite-relay` loaded, relay and forward transports initialized. Co
 - Triggered orchestrator relay dispatch for `systems-eng`.
 - Relay bot posted to mapped subagent channel (#tech).
 - Dispatch marker present: `[relay_dispatch_id:8afe4945-d854-4b72-a399-1f31fa67e9e4]`.
-- @mention included for routing (`@climbswithgoats`).
+- No @mention in relay post (current behavior).
 
 ### Test B: Capture + forward path [PARTIAL — loop works, content incomplete]
 - CTO responds in subagent channel.
@@ -161,7 +161,7 @@ Expected: `clawsuite-relay` loaded, relay and forward transports initialized. Co
 
 ## Deferred UX issues (observed during live testing)
 - **Bot identity:** Resolved — the separate relay bot ("ClawSuite-Relay") has its own name and visual styling (yellow highlight in Discord), providing clear distinction from OpenClaw's direct messages.
-- **@mention in relay posts:** The relay posts `@username` for routing/gating purposes, but this is confusing to human readers who see themselves mentioned in a machine-to-machine prompt. The mention map currently targets the human user, not the OpenClaw bot. Consider removing the mention since `requireMention: false` makes it unnecessary.
+- **@mention in relay posts:** Resolved — mentions were removed from relay dispatch posts.
 - **Visible dispatch markers:** `[relay_dispatch_id:...]` markers appear in channel messages. Functional for correlation but noisy for casual reading. Consider moving to Discord embed metadata or message components in a future phase.
 
 ---

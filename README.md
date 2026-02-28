@@ -41,8 +41,6 @@ The relay bot appears with its own name and visual styling in Discord, which pro
 Configure via environment variables (typically in a systemd drop-in):
 - `CLAWSUITE_RELAY_BOT_TOKEN` — the **relay bot's** token (not the main OpenClaw bot token)
 - `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
-- `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
-- `CLAWSUITE_RELAY_MENTION_ENABLED` — `1` (default) or `0` to disable @mentions entirely (ignores mention map)
 - `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
 - `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
 - `CLAWSUITE_RELAY_ARM_TTL_MS` — armed dispatch TTL in milliseconds (default `1800000` / 30 minutes)
@@ -53,7 +51,6 @@ Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/claw
 Environment=CLAWSUITE_RELAY_ENABLED=1
 Environment=CLAWSUITE_RELAY_BOT_TOKEN=<relay_bot_token>
 Environment=CLAWSUITE_RELAY_CHANNEL_MAP_JSON="{\"systems-eng\":\"1474868861525557308\"}"
-Environment=CLAWSUITE_RELAY_MENTION_MAP_JSON="{\"systems-eng\":\"794579141801934879\"}"
 Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 ```
 
@@ -123,5 +120,5 @@ The `dispatchId` is the correlation key that links a dispatch to its result. It 
 Journal logs include `dispatch=<id>` at each step for end-to-end tracing.
 
 ## Resolved UX items
-- **@mention toggle:** Mentions controlled by `CLAWSUITE_RELAY_MENTION_ENABLED` env var (`"1"` = enabled/default, `"0"` = disabled). When disabled, `mentionsByAgent` is set to `undefined` at the config layer — no per-agent changes needed. Currently deployed as `0` (off).
+- **@mentions removed from relay dispatch posts:** relay messages are posted without user mentions.
 - **Dispatch marker removed from Discord:** `[relay_dispatch_id:...]` no longer appears in channel messages. Footer now reads `from <agent>` — provenance preserved, noisy UUID dropped. Gateway-side markers unchanged (orchestrator needs them for correlation).

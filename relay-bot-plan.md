@@ -1,5 +1,7 @@
 # Relay Bot Plan — Orchestrator↔subagent Transparency
 
+> Note (2026-02-28): This is a historical design document. Mention-gating sections are superseded; current relay dispatches do not use @mentions.
+
 **Created:** 2026-02-26  
 **Owner:** President (design), CTO (implementation)  
 **Status:** Milestone 1 — PRIMARY BLOCKER RESOLVED. Capture + delivery working (see implementation-plan.md for remaining polish)

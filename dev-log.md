@@ -1370,3 +1370,17 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Documentation: feature-backlog.md (I, J, M, N marked completed with concrete values), README.md (deferred UX → resolved, env var docs updated with `MENTION_ENABLED` and `ARM_TTL_MS` defaults), dev-log.md (this entry).
 - Risk introduced: Low. Retry adds max 6s latency on transient failures (2 retries × 2s backoff worst case for 5xx, or Retry-After-driven for 429). Mention toggle and footer changes are purely cosmetic. TTL bump is conservative (30 min vs 5 min).
 - Rollback note: Revert commit on `top-down-cleanup` branch. Remove `CLAWSUITE_RELAY_MENTION_ENABLED=0` from conf. Rebuild + restart gateway.
+
+- Date/Time: 2026-02-28
+- Author: Codex (GPT-5)
+- Change: Removed mention support entirely; hardened retry edge cases; docs consistency pass.
+- Why: Mention toggle was no longer needed operationally. Full removal reduces config and code surface area. Retry path needed to cover thrown network errors and malformed `Retry-After` values.
+- Evidence:
+  - Mention map/toggle support deleted from transport and env parsing.
+  - Relay Discord serialization no longer has mention option; dispatch posts are always non-mention.
+  - Retry now handles thrown `fetch` errors and defensive `Retry-After` parsing with fallback/clamp.
+  - Tests updated: deterministic backoff via injected `sleepFn`; new cases for network-throw retry and invalid `Retry-After`.
+  - Active docs updated (`README.md`, `setup-runbook.md`, `feature-backlog.md`, `implementation-plan.md`, `live-activation-runbook.md`).
+  - Historical docs tagged with supersession note (`relay-bot-plan.md`, `test-validation-plan.md`).
+- Risk introduced: Low. Behavior change is intentional (no mentions). Retry behavior remains bounded by existing attempt budget.
+- Rollback note: Revert latest local commit touching mention removal and retry hardening. If needed, reintroduce mention env/schema in transport and docs.

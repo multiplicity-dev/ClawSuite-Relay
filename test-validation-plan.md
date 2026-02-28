@@ -1,5 +1,7 @@
 # Test & Validation Plan — Relay Bot Initiative
 
+> Note (2026-02-28): This file contains historical v1-era validation notes. Current behavior no longer uses @mentions in relay dispatch posts.
+
 ## Test categories
 1. Functional E2E
 2. Failure-path behavior (fail loudly)

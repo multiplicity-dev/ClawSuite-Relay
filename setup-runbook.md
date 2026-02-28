@@ -69,27 +69,19 @@ In `~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`, add
 Environment=CLAWSUITE_RELAY_CHANNEL_MAP_JSON="{\"agent-id\":\"channel-id\", ...}"
 ```
 
-### c. Update mention map (optional)
-
-If the agent's channel should @mention a user when tasks arrive, add to `CLAWSUITE_RELAY_MENTION_MAP_JSON`:
-
-```ini
-Environment=CLAWSUITE_RELAY_MENTION_MAP_JSON="{\"agent-id\":\"user-id\", ...}"
-```
-
-### d. Update CEO's TOOLS.md
+### c. Update CEO's TOOLS.md
 
 - Add the agent to the "Relay-bound agents" list in the Relay Bot section.
 - Add a row to the Relay Session Keys table with the agent's session key: `agent:<agent-id>:discord:channel:<channel-id>`.
 
-### e. Gateway restart
+### d. Gateway restart
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user restart openclaw-gateway.service
 ```
 
-### f. Verify
+### e. Verify
 
 See "Verification Checklist" below.
 
@@ -104,7 +96,6 @@ All variables are set in the systemd drop-in: `~/.config/systemd/user/openclaw-g
 | `CLAWSUITE_RELAY_ENABLED` | Yes | Set to `1` to enable the relay plugin |
 | `CLAWSUITE_RELAY_BOT_TOKEN` | Yes | Discord bot token for ClawSuite-Relay |
 | `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` | Yes | JSON object mapping agent IDs to Discord channel IDs |
-| `CLAWSUITE_RELAY_MENTION_MAP_JSON` | No | JSON object mapping agent IDs to Discord user IDs for @mentions |
 | `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` | Yes | Discord channel ID of the orchestrator's channel (#general) |
 | `CLAWSUITE_RELAY_DEBUG_OUTBOUND` | No | Set to `1` for verbose outbound logging |
 | `CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES` | No | Set to `1` to auto-delete trigger messages from orchestrator channel |

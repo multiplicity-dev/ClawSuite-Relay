@@ -12,12 +12,12 @@ Prioritized list of pending work, from concrete to speculative. Created 2026-02-
 - [x] Content parity with native sessions_spawn confirmed
 - [x] Agentic experimental design framework + session-history case study
 - [x] **A. Multi-agent generalization** — removed `V1_TARGET_AGENT` hardcoded restriction, transport validates against channel map
-- [x] **B. All 12 agents onboarded** — channel + mention maps configured, gateway restarted
+- [x] **B. All 12 agents onboarded** — channel maps configured, gateway restarted
 - [x] **C. Soul.md updates** — CEO's TOOLS.md updated with all relay-bound agents, session keys, sessions_history guidance
 - [x] **D. Propensity test** — CEO used relay_dispatch for CLO without prompting (contaminated — heavily primed). Clean test deferred to naive subjects.
 - [x] **E. Announce suppression** — deleted. Speculative code that never fired; native completion announce doesn't trigger for relay-initiated embedded runs.
 - [x] **Full system test** — all 12 agents dispatched and returned successfully, including 4-way parallel dispatch with synthesis (2026-02-28)
-- [x] **Q. All-directional relay** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]`. CEO added to channel + mention maps (was missing, caused RELAY_UNAVAILABLE on inbound). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces. Config-only, no code changes. (2026-02-28)
+- [x] **Q. All-directional relay** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]`. CEO added to channel map (was missing, caused RELAY_UNAVAILABLE on inbound). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces. Config-only, no code changes. (2026-02-28)
 - [x] **Naive subject propensity test** — CEO dispatched to Life Coach ("message the life coach that this is just a test"). Life Coach received via relay and responded naturally. CEO used `relay_dispatch` without prompting — explained it was guided by TOOLS.md Subagent Policy loaded as project context. Key finding: OpenClaw injects workspace files (TOOLS.md, SOUL.md, etc.) on every turn, not just at session start. No new session or gateway restart needed for agents to pick up TOOLS.md changes — content is live immediately. This explains why all agents adopted relay dispatch on first contact after the wiring change. (2026-02-28)
 
 ---
@@ -41,8 +41,8 @@ Should the relay pre-fetch recent history and include it in the trigger message?
 ### H. Observability playbook
 - [ ] Document how to trace a dispatch end-to-end via `dispatchId` in journal logs. We've been doing this ad hoc — formalize the grep patterns, expected log events, and diagnostic workflow. Low effort, high value for incident response.
 
-### I. @mention noise cleanup — COMPLETED
-Mentions disabled at config layer via `CLAWSUITE_RELAY_MENTION_ENABLED=0` (default `1`/enabled). When `"0"`, `transportFromEnv()` sets `mentionsByAgent` to `undefined` — no downstream logic changes needed. Currently deployed as disabled.
+### I. @mention removal — COMPLETED
+@mentions were removed from relay dispatch posts entirely. Mention map/toggle env vars and mention-related code paths were deleted.
 
 ### J. Dispatch marker visibility — COMPLETED
 `[relay_dispatch_id:...]` removed from Discord-facing footers (`serializeForDiscord` and multi-message footer). Footer now reads `from <source>` — provenance preserved, noisy UUID dropped. Gateway-side markers (`serializeForGateway`) unchanged — orchestrator still uses them for correlation. `src/markers.ts` deleted (dead code, no consumers).
@@ -92,9 +92,7 @@ Q (all-directional) DONE (2026-02-28)
 
 ---
 
-## Selection criteria— deleted. Speculative code that never fired; native completion announce doesn't trigger for relay-initiated embedded runs.
-￼￼￼￼￼ ￼￼Full system test￼￼ — all 12 agents dispatched and returned successfully, including 4-way parallel dispatch with synthesis (2026-02-28)
-￼￼￼￼￼ ￼￼Q. All-directional relay￼￼ — all 13 agents wired with ￼￼tools.alsoAllow: ["relay_dispatch"]￼￼. CEO add
+## Selection criteria
 
 When choosing what to work on:
 1. **Does it address observed friction?** Prioritize over theoretical improvements.

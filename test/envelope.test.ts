@@ -72,24 +72,11 @@ test("serializeForDiscord includes footer with source provenance", () => {
   assert.ok(!msg.includes("relay_dispatch_id"), "dispatch ID marker should not appear in Discord footer");
 });
 
-test("serializeForDiscord prepends mention when provided", () => {
+test("serializeForDiscord omits @mentions", () => {
   const dispatch: RelayEnvelope = {
     source: "ceo",
     target: "systems-eng",
     dispatchId: "d-test-4",
-    createdAt: "2026-02-28T10:00:00.000Z",
-    type: "dispatch",
-    content: "Task here."
-  };
-  const msg = serializeForDiscord(dispatch, { mentionUserId: "794579141801934879" });
-  assert.match(msg, /^<@794579141801934879>/);
-});
-
-test("serializeForDiscord omits mention when not provided", () => {
-  const dispatch: RelayEnvelope = {
-    source: "ceo",
-    target: "systems-eng",
-    dispatchId: "d-test-5",
     createdAt: "2026-02-28T10:00:00.000Z",
     type: "dispatch",
     content: "Task here."

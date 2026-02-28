@@ -1,14 +1,14 @@
-import test, { mock } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRelayContent, splitText, DiscordRelayTransport } from "../src/transport-discord.js";
 
-test("buildRelayContent includes mention and source but not dispatch ID marker", () => {
+test("buildRelayContent includes source but not dispatch ID marker or mention", () => {
   const content = buildRelayContent(
     { dispatchId: "d-1", targetAgentId: "systems-eng", task: "hello" },
-    { mentionUserId: "123456789012345678", sourceAgentId: "ceo" }
+    { sourceAgentId: "ceo" }
   );
-  assert.match(content, /^<@123456789012345678>/);
   assert.match(content, /from ceo/);
+  assert.ok(!content.includes("<@"), "mention should not appear");
   assert.ok(!content.includes("relay_dispatch_id"), "dispatch ID marker should not appear");
 });
 
@@ -42,6 +42,7 @@ test("splitText hard-splits when no natural boundary", () => {
 test("postToChannel retries on transient 502 then succeeds", async () => {
   const originalFetch = globalThis.fetch;
   let callCount = 0;
+  const sleepCalls: number[] = [];
 
   globalThis.fetch = (async () => {
     callCount++;
@@ -54,7 +55,10 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
   try {
     const transport = new DiscordRelayTransport({
       botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" }
+      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      }
     });
     const result = await transport.postToChannel({
       dispatchId: "d-retry-1",
@@ -63,6 +67,7 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
     });
     assert.equal(result.messageId, "msg-123");
     assert.equal(callCount, 2, "should have retried once after 502");
+    assert.deepEqual(sleepCalls, [2000], "should use 2s server-error backoff");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -71,6 +76,7 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
 test("postToChannel does not retry on non-transient 403", async () => {
   const originalFetch = globalThis.fetch;
   let callCount = 0;
+  const sleepCalls: number[] = [];
 
   globalThis.fetch = (async () => {
     callCount++;
@@ -80,13 +86,90 @@ test("postToChannel does not retry on non-transient 403", async () => {
   try {
     const transport = new DiscordRelayTransport({
       botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" }
+      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      }
     });
     await assert.rejects(
       () => transport.postToChannel({ dispatchId: "d-retry-2", targetAgentId: "systems-eng", task: "test" }),
       /Discord post failed \(403\)/
     );
     assert.equal(callCount, 1, "should not retry on 403");
+    assert.equal(sleepCalls.length, 0, "should not back off on non-transient errors");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("postToChannel retries on thrown network error then succeeds", async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  const sleepCalls: number[] = [];
+
+  globalThis.fetch = (async () => {
+    callCount++;
+    if (callCount === 1) {
+      throw new Error("socket hang up");
+    }
+    return { ok: true, json: async () => ({ id: "msg-456" }) };
+  }) as typeof fetch;
+
+  try {
+    const transport = new DiscordRelayTransport({
+      botToken: "fake-token",
+      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      }
+    });
+    const result = await transport.postToChannel({
+      dispatchId: "d-retry-3",
+      targetAgentId: "systems-eng",
+      task: "test"
+    });
+    assert.equal(result.messageId, "msg-456");
+    assert.equal(callCount, 2, "should retry once after network error");
+    assert.deepEqual(sleepCalls, [2000], "should use server-error backoff for network errors");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("postToChannel uses fallback Retry-After when header is invalid", async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  const sleepCalls: number[] = [];
+
+  globalThis.fetch = (async () => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        ok: false,
+        status: 429,
+        text: async () => "Rate limited",
+        headers: new Headers([["Retry-After", "not-a-number"]])
+      };
+    }
+    return { ok: true, json: async () => ({ id: "msg-789" }) };
+  }) as typeof fetch;
+
+  try {
+    const transport = new DiscordRelayTransport({
+      botToken: "fake-token",
+      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      sleepFn: async (ms) => {
+        sleepCalls.push(ms);
+      }
+    });
+    const result = await transport.postToChannel({
+      dispatchId: "d-retry-4",
+      targetAgentId: "systems-eng",
+      task: "test"
+    });
+    assert.equal(result.messageId, "msg-789");
+    assert.equal(callCount, 2, "should retry once after 429");
+    assert.deepEqual(sleepCalls, [2000], "should fall back to default Retry-After");
   } finally {
     globalThis.fetch = originalFetch;
   }

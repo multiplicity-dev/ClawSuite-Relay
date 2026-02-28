@@ -62,13 +62,11 @@ export function serializeForGateway(
  * Serialize envelope for Discord channel posting (dispatch → subagent).
  *
  * Human-readable context: task content is prominent, envelope metadata
- * in a compact footer. Overhead is ~80-100 chars for the footer.
+ * in a compact footer.
  */
 export function serializeForDiscord(
-  envelope: RelayEnvelope,
-  opts?: { mentionUserId?: string }
+  envelope: RelayEnvelope
 ): string {
-  const mention = opts?.mentionUserId ? `<@${opts.mentionUserId}>\n` : "";
   const footer = `\n\nfrom ${envelope.source}`;
-  return `${mention}${envelope.content}${footer}`;
+  return `${envelope.content}${footer}`;
 }

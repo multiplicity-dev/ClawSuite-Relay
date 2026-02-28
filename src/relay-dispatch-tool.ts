@@ -33,7 +33,7 @@ export function createRelayDispatchToolFactory(transport: RelayTransport | undef
       label: "Relay Dispatch",
       description:
         "Dispatch a task to a relay-bound agent via their dedicated Discord channel. " +
-        "The task is posted with a mention, and the agent's response is automatically " +
+        "The task is posted to the agent channel, and the agent's response is automatically " +
         "captured and forwarded back. Use this for relay-bound agent tasks that benefit " +
         "from persistent channel context and visible prompt/response audit trails.",
       parameters,
