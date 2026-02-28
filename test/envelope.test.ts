@@ -58,7 +58,7 @@ test("serializeForDiscord includes task content prominently", () => {
   assert.ok(msg.startsWith("Please audit the codebase."));
 });
 
-test("serializeForDiscord includes footer with dispatch ID and source", () => {
+test("serializeForDiscord includes footer with source provenance", () => {
   const dispatch: RelayEnvelope = {
     source: "ceo",
     target: "systems-eng",
@@ -68,7 +68,8 @@ test("serializeForDiscord includes footer with dispatch ID and source", () => {
     content: "Task here."
   };
   const msg = serializeForDiscord(dispatch);
-  assert.match(msg, /\[relay_dispatch_id:d-test-3\] from ceo/);
+  assert.match(msg, /from ceo/);
+  assert.ok(!msg.includes("relay_dispatch_id"), "dispatch ID marker should not appear in Discord footer");
 });
 
 test("serializeForDiscord prepends mention when provided", () => {

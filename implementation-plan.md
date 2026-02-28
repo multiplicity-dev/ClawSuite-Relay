@@ -141,7 +141,7 @@ Status: Phase 2 COMPLETE. All-directional relay wired (2026-02-28). Naive subjec
 - [x] Multi-agent relay dispatch works end-to-end (12 agents verified, 2026-02-28)
 - [x] Orchestrator synthesizes from multiple parallel results in single conversation (4-way parallel verified)
 - [x] Agent rollout does not require code changes (config-only)
-- [ ] All-directional dispatch topology designed and deployed
+- [x] All-directional dispatch topology designed and deployed
 - [x] Multi-dispatch coordination works behaviorally — CEO tracked 4 parallel async dispatches and synthesized correctly without scripted fan-in (2026-02-28). Scripted fan-in deferred unless behavioral coordination fails under stress.
 
 ---

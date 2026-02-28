@@ -40,7 +40,7 @@ export default function register(api: PluginApi) {
   // so we can store it in the armed dispatch for later internal delivery.
   api.registerTool(createRelayDispatchToolFactory(relayTransport));
 
-  const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 300000);
+  const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 1800000);
 
   async function disarmDispatch(agentId: string, dispatchId?: string) {
     if (!dispatchId) {

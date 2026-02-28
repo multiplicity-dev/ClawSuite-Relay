@@ -39,16 +39,13 @@ Should the relay pre-fetch recent history and include it in the trigger message?
 **Current state**: Guidance-only approach deployed. CEO propensity to use `sessions_history` is near-zero. If soul.md guidance doesn't increase propensity, pre-fetch becomes more attractive.
 
 ### H. Observability playbook
-Document how to trace a dispatch end-to-end via `dispatchId` in journal logs. We've been doing this ad hoc — formalize the grep patterns, expected log events, and diagnostic workflow. Low effort, high value for incident response.
+- [ ] Document how to trace a dispatch end-to-end via `dispatchId` in journal logs. We've been doing this ad hoc — formalize the grep patterns, expected log events, and diagnostic workflow. Low effort, high value for incident response.
 
-### I. @mention noise cleanup
-Relay posts @mention the human user for routing, but this is unnecessary when `requireMention: false` is set. The mention map currently targets the human user, not the OpenClaw bot. Options:
-- Remove mention entirely when requireMention is false
-- Target the OpenClaw bot user ID instead
-- Make mention behavior configurable per agent
+### I. @mention noise cleanup — COMPLETED
+Mentions disabled at config layer via `CLAWSUITE_RELAY_MENTION_ENABLED=0` (default `1`/enabled). When `"0"`, `transportFromEnv()` sets `mentionsByAgent` to `undefined` — no downstream logic changes needed. Currently deployed as disabled.
 
-### J. Dispatch marker visibility
-`[relay_dispatch_id:...]` in channel messages is functional for correlation but noisy for casual reading. Could be moved to Discord embed metadata. Low priority — functional as-is.
+### J. Dispatch marker visibility — COMPLETED
+`[relay_dispatch_id:...]` removed from Discord-facing footers (`serializeForDiscord` and multi-message footer). Footer now reads `from <source>` — provenance preserved, noisy UUID dropped. Gateway-side markers (`serializeForGateway`) unchanged — orchestrator still uses them for correlation. `src/markers.ts` deleted (dead code, no consumers).
 
 ### K. Scripted fan-in coordination (multi-dispatch)
 Correlation ID per dispatch batch, plugin tracks expected vs received responses, triggers orchestrator only when all arrive. Replaces soft "wait for all results" instruction with deterministic behavior.
@@ -71,11 +68,11 @@ Everything above this line has concrete plans or is informed by observed behavio
 ### L. Plugin packaging for external distribution
 Move from local install (`openclaw plugins install -l`) to distributable package. Premature until API surface stabilizes.
 
-### M. Dispatch timeout
-Configurable per-dispatch timeout (default 10 minutes). On expiry: mark dispatch FAILED, notify orchestrator. Haven't hit timeout issues in practice.
+### M. ARM TTL bump — COMPLETED
+Default ARM TTL raised from 5 minutes to 30 minutes (`1800000` ms) in `openclaw-plugin.ts`. 5 minutes was too short for real agent work — subagent runs routinely exceed it. Still configurable via `CLAWSUITE_RELAY_ARM_TTL_MS` env var.
 
-### N. Retry budget
-Transient API errors get 2 attempts with short backoff. Non-transient errors fail immediately. Current behavior: single attempt, fail-loud. Adequate for current usage.
+### N. Transient retry for Discord API — COMPLETED
+`postDiscordMessage()` now retries transient failures (429, 500, 502, 503) with a budget of 2 retries (3 total attempts). 429: respects Discord's `Retry-After` header. 5xx: fixed 2-second backoff. Non-transient errors (400, 403, 404) fail immediately. This is the single write boundary where internal relay state becomes external reality — without retry, transient failures silently corrupt the orchestration graph.
 
 ### O. Per-agent relay configuration
 Different timeout, retry, and routing policies per agent. Over-engineering until there are enough agents to warrant differentiation.
@@ -95,7 +92,9 @@ Q (all-directional) DONE (2026-02-28)
 
 ---
 
-## Selection criteria
+## Selection criteria— deleted. Speculative code that never fired; native completion announce doesn't trigger for relay-initiated embedded runs.
+￼￼￼￼￼ ￼￼Full system test￼￼ — all 12 agents dispatched and returned successfully, including 4-way parallel dispatch with synthesis (2026-02-28)
+￼￼￼￼￼ ￼￼Q. All-directional relay￼￼ — all 13 agents wired with ￼￼tools.alsoAllow: ["relay_dispatch"]￼￼. CEO add
 
 When choosing what to work on:
 1. **Does it address observed friction?** Prioritize over theoretical improvements.

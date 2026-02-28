@@ -16,26 +16,53 @@ function validateSnowflake(value: string | undefined, label: string) {
   }
 }
 
+// Transient retry for the single write boundary to Discord.
+// 429: respect Retry-After header. 500/502/503: fixed 2s backoff.
+// Non-transient (400/403/404) fail immediately — zero chance of success on retry.
+const MAX_ATTEMPTS = 3;
+const SERVER_ERROR_BACKOFF_MS = 2000;
+const TRANSIENT_STATUS = new Set([429, 500, 502, 503]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function postDiscordMessage(
   botToken: string,
   channelId: string,
   content: string
 ): Promise<{ id: string }> {
-  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${botToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ content })
-  });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${botToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content })
+    });
 
-  if (!response.ok) {
+    if (response.ok) {
+      return (await response.json()) as { id: string };
+    }
+
     const text = await response.text();
-    throw new Error(`Discord post failed (${response.status}): ${text}`);
+
+    if (!TRANSIENT_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
+      throw new Error(`Discord post failed (${response.status}): ${text}`);
+    }
+
+    // 429: use Discord-provided Retry-After (seconds). 5xx: fixed backoff.
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get("Retry-After") || "2");
+      await sleep(retryAfter * 1000);
+    } else {
+      await sleep(SERVER_ERROR_BACKOFF_MS);
+    }
   }
 
-  return (await response.json()) as { id: string };
+  // Unreachable — loop always returns or throws — but satisfies TypeScript.
+  throw new Error("Discord post failed: retry budget exhausted");
 }
 
 export function buildRelayContent(request: RelayPostRequest, opts?: { mentionUserId?: string; sourceAgentId?: string }): string {
@@ -97,7 +124,7 @@ export class DiscordRelayTransport implements RelayTransport {
     // Multi-message: split the task content, prepend mention to first chunk,
     // append envelope footer to last chunk.
     const mentionPrefix = mentionUserId ? `<@${mentionUserId}>\n` : "";
-    const footer = `\n\n[relay_dispatch_id:${request.dispatchId}] from ${request.sourceAgentId ?? "relay"}`;
+    const footer = `\n\nfrom ${request.sourceAgentId ?? "relay"}`;
 
     // Reserve space for mention/footer in first/last chunk
     const firstMaxLen = DISCORD_MAX_CONTENT - mentionPrefix.length;
@@ -141,7 +168,8 @@ export function transportFromEnv(): DiscordRelayTransport {
     rawChannels,
     "CLAWSUITE_RELAY_CHANNEL_MAP_JSON"
   );
-  const mentionsByAgent = rawMentions
+  const mentionEnabled = process.env.CLAWSUITE_RELAY_MENTION_ENABLED !== "0";
+  const mentionsByAgent = mentionEnabled && rawMentions
     ? parseJsonEnv<Record<string, string>>(rawMentions, "CLAWSUITE_RELAY_MENTION_MAP_JSON")
     : undefined;
 

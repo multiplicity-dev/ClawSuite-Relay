@@ -1354,3 +1354,19 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Documentation updated: feature-backlog.md (Q and propensity test marked completed), implementation-plan.md (all-directional + Phase 3 status), README.md (status line), dev-log.md (this entry).
 - Risk introduced: None. Config-only changes, trivially reversible.
 - Rollback note: Revert `openclaw.json` tool blocks, remove CEO from `clawsuite-relay.conf` maps, restore old TOOLS.md files, restart gateway.
+
+- Date/Time: 2026-02-28
+- Author: Claude Code (Opus 4.6)
+- Change: Relay UX cleanup + transport resilience (backlog items I, J, M, N).
+- Why: Reduce Discord noise (@mentions, dispatch ID markers), fix ARM TTL being too short for real agent work, and add retry at the Discord write boundary to prevent silent orchestration graph corruption from transient failures.
+- Evidence:
+  - **I. @mention toggle:** `transportFromEnv()` checks `CLAWSUITE_RELAY_MENTION_ENABLED` env var. When `"0"`, `mentionsByAgent` set to `undefined`. Default `"1"` (enabled). Deployed as `0` in `clawsuite-relay.conf`.
+  - **J. Dispatch marker removal:** `serializeForDiscord()` footer changed from `[relay_dispatch_id:${id}] from ${source}` to `from ${source}`. Same change in multi-message footer constant. `src/markers.ts` deleted — `extractRelayDispatchId()` had no consumers after earlier `capture.ts` deletion. Gateway-side markers preserved (orchestrator needs them).
+  - **M. ARM TTL bump:** Default changed from `300000` (5 min) to `1800000` (30 min) in `openclaw-plugin.ts`. Still overridable via `CLAWSUITE_RELAY_ARM_TTL_MS`.
+  - **N. Transient retry:** `postDiscordMessage()` wrapped in retry loop. Budget: 2 retries (3 total attempts). 429 → respects `Retry-After` header. 500/502/503 → 2s fixed backoff. Non-transient (400/403/404) → fail immediately.
+  - Tests: 28/28 pass. New tests: retry-on-502-then-success, no-retry-on-403. Existing footer assertions updated.
+  - Typecheck: clean. Build: clean.
+  - Config deployed: `CLAWSUITE_RELAY_MENTION_ENABLED=0` added to systemd drop-in. Gateway restarted.
+  - Documentation: feature-backlog.md (I, J, M, N marked completed with concrete values), README.md (deferred UX → resolved, env var docs updated with `MENTION_ENABLED` and `ARM_TTL_MS` defaults), dev-log.md (this entry).
+- Risk introduced: Low. Retry adds max 6s latency on transient failures (2 retries × 2s backoff worst case for 5xx, or Retry-After-driven for 429). Mention toggle and footer changes are purely cosmetic. TTL bump is conservative (30 min vs 5 min).
+- Rollback note: Revert commit on `top-down-cleanup` branch. Remove `CLAWSUITE_RELAY_MENTION_ENABLED=0` from conf. Rebuild + restart gateway.

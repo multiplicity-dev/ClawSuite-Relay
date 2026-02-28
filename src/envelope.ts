@@ -69,6 +69,6 @@ export function serializeForDiscord(
   opts?: { mentionUserId?: string }
 ): string {
   const mention = opts?.mentionUserId ? `<@${opts.mentionUserId}>\n` : "";
-  const footer = `\n\n[relay_dispatch_id:${envelope.dispatchId}] from ${envelope.source}`;
+  const footer = `\n\nfrom ${envelope.source}`;
   return `${mention}${envelope.content}${footer}`;
 }

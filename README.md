@@ -42,8 +42,10 @@ Configure via environment variables (typically in a systemd drop-in):
 - `CLAWSUITE_RELAY_BOT_TOKEN` — the **relay bot's** token (not the main OpenClaw bot token)
 - `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
 - `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
+- `CLAWSUITE_RELAY_MENTION_ENABLED` — `1` (default) or `0` to disable @mentions entirely (ignores mention map)
 - `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
 - `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
+- `CLAWSUITE_RELAY_ARM_TTL_MS` — armed dispatch TTL in milliseconds (default `1800000` / 30 minutes)
 
 Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`):
 ```ini
@@ -110,6 +112,16 @@ The relay bot uses a separate Discord bot token. By default, OpenClaw ignores bo
 ```
 The relay bot's user ID can be decoded from its token: `echo -n "<token_prefix_before_first_dot>" | base64 -d`.
 
-## Known deferred UX items
-- @mention noise: Relay posts @mention the human user for routing, but this is unnecessary when `requireMention: false` is set. The mention map currently targets the human user, not the OpenClaw bot.
-- Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional for correlation but noisy for casual reading. Could be moved to Discord embed metadata in a future phase.
+## Dispatch ID correlation path
+The `dispatchId` is the correlation key that links a dispatch to its result. It does not appear in Discord channel messages — correlation is handled internally:
+
+1. **Orchestrator** receives the `dispatchId` from the `relay_dispatch` tool result
+2. **Armed dispatch file** (disk-persisted) stores the `dispatchId` for the target agent
+3. **`llm_output` hook** reads the armed file — no message-content parsing needed
+4. **Gateway injection** includes `[relay_dispatch_id:...]` in the message delivered back to the orchestrator's session
+
+Journal logs include `dispatch=<id>` at each step for end-to-end tracing.
+
+## Resolved UX items
+- **@mention toggle:** Mentions controlled by `CLAWSUITE_RELAY_MENTION_ENABLED` env var (`"1"` = enabled/default, `"0"` = disabled). When disabled, `mentionsByAgent` is set to `undefined` at the config layer — no per-agent changes needed. Currently deployed as `0` (off).
+- **Dispatch marker removed from Discord:** `[relay_dispatch_id:...]` no longer appears in channel messages. Footer now reads `from <agent>` — provenance preserved, noisy UUID dropped. Gateway-side markers unchanged (orchestrator needs them for correlation).
