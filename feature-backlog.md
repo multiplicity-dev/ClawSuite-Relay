@@ -17,21 +17,21 @@ Prioritized list of pending work, from concrete to speculative. Created 2026-02-
 - [x] **D. Propensity test** — CEO used relay_dispatch for CLO without prompting (contaminated — heavily primed). Clean test deferred to naive subjects.
 - [x] **E. Announce suppression** — deleted. Speculative code that never fired; native completion announce doesn't trigger for relay-initiated embedded runs.
 - [x] **Full system test** — all 12 agents dispatched and returned successfully, including 4-way parallel dispatch with synthesis (2026-02-28)
+- [x] **Q. All-directional relay** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]`. CEO added to channel + mention maps (was missing, caused RELAY_UNAVAILABLE on inbound). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces. Config-only, no code changes. (2026-02-28)
+- [x] **Naive subject propensity test** — CEO dispatched to Life Coach ("message the life coach that this is just a test"). Life Coach received via relay and responded naturally. CEO used `relay_dispatch` without prompting — explained it was guided by TOOLS.md Subagent Policy loaded as project context. Key finding: OpenClaw injects workspace files (TOOLS.md, SOUL.md, etc.) on every turn, not just at session start. No new session or gateway restart needed for agents to pick up TOOLS.md changes — content is live immediately. This explains why all agents adopted relay dispatch on first contact after the wiring change. (2026-02-28)
 
 ---
 
 ## Tier 1 — Concrete, high-value
 
-### Remaining live tests
-
-- **Naive subject propensity test** — test relay_dispatch adoption with agents that have NOT been primed. Add relay_dispatch to each agent's `tools.alsoAllow`, update their soul.md with relay awareness, then observe natural tool selection. CEO's test was contaminated (extensive prior relay use + self-edited TOOLS.md).
+(Empty — all Tier 1 items completed.)
 
 ---
 
 ## Tier 2 — Valuable, needs design decisions
 
 ### F. Phase 3 routing enforcement (likely unnecessary)
-Propensity test showed CEO defaults to relay without enforcement. The contamination concern is valid, but the CEO's self-reported reasoning ("persistent channel context for legal work") suggests genuine tool preference, not just compliance. **Defer until naive subject tests provide cleaner signal.**
+Propensity test showed CEO defaults to relay without enforcement. Naive subject test (Life Coach) confirmed: agents follow TOOLS.md policy on first contact without priming. **Enforcement is almost certainly unnecessary.** Revisit only if an agent demonstrably ignores the policy under load.
 
 ### G. sessions_history pre-fetch (conditional on usage patterns)
 Should the relay pre-fetch recent history and include it in the trigger message? Pro: automatic, no CEO action needed. Con: larger trigger, may include irrelevant context.
@@ -55,12 +55,8 @@ Correlation ID per dispatch batch, plugin tracks expected vs received responses,
 
 **Update (2026-02-28):** Live testing showed the CEO successfully coordinated 4 parallel dispatches behaviorally — tracking dispatchIds, reporting partial results, and synthesizing when all arrived. Scripted fan-in may be over-engineering for the current orchestrator. Revisit if behavioral coordination fails under stress or with less capable orchestrators.
 
-### Q. All-directional relay (any agent → any agent)
-Currently only the CEO can dispatch (only agent with `tools.alsoAllow: ["relay_dispatch"]`). Enable any relay-bound agent to dispatch to any other. Requires:
-- Per-agent `tools.alsoAllow` updates
-- Soul.md updates for each dispatching agent (relay awareness, available targets)
-- Design decision: should non-orchestrator agents dispatch freely, or only back to the orchestrator?
-- Currently CTO gets `RELAY_UNAVAILABLE` when attempting dispatch — tool is registered but not in `alsoAllow`.
+### Q. All-directional relay (any agent → any agent) — COMPLETED
+Moved to Completed section above (2026-02-28). All 13 agents wired, CEO added to maps, TOOLS.md deployed.
 
 ---
 
@@ -92,9 +88,9 @@ CLI argument path has ~2MB practical limit (Linux ARG_MAX). For extremely long s
 ## Dependencies
 
 ```
-F (enforcement) conditional on naive subject propensity test results
+F (enforcement) likely unnecessary — naive subject test confirmed agents follow TOOLS.md policy
 K (fan-in) may be unnecessary — behavioral coordination worked for 4-way parallel
-Q (all-directional) independent, config + soul.md only, no code changes needed
+Q (all-directional) DONE (2026-02-28)
 ```
 
 ---

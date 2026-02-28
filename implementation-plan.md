@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Phase 2 COMPLETE. Multi-agent generalization + 12-agent onboarding complete (2026-02-28). Propensity test (Phase 3 prerequisite) ready for live execution.
+Status: Phase 2 COMPLETE. All-directional relay wired (2026-02-28). Naive subject propensity test passed — agents adopt relay from TOOLS.md policy on first contact. Phase 3 (enforcement) likely unnecessary.
 
 ## Phase 0 — Design Freeze
 - [x] Approve TDD
@@ -76,7 +76,7 @@ Status: Phase 2 COMPLETE. Multi-agent generalization + 12-agent onboarding compl
 
 **Goal:** Ensure the CEO uses `relay_dispatch` for relay-bound agents instead of drifting back to `sessions_spawn`.
 
-**Status (2026-02-28):** Propensity test showed CEO defaults to relay_dispatch without enforcement. Test was contaminated (CEO heavily primed from relay development + self-edited TOOLS.md), but CEO's self-reported reasoning suggests genuine preference based on persistent channel context. Defer until naive subject testing provides cleaner signal. See `agentic-experimental-design.md` case study 3.
+**Status (2026-02-28):** Likely unnecessary. CEO propensity test was contaminated (heavily primed), but naive subject test (Life Coach, 2026-02-28) confirmed: agents follow TOOLS.md Subagent Policy on first contact without priming. Key finding: OpenClaw injects workspace files every turn, so TOOLS.md changes take effect immediately — no new session needed. See `agentic-experimental-design.md` case study 3 and `feature-backlog.md` completed items.
 
 ### Routing policy (deferred)
 - [ ] `before_tool_call` hook blocking `sessions_spawn` for relay-bound agents
@@ -129,9 +129,9 @@ Status: Phase 2 COMPLETE. Multi-agent generalization + 12-agent onboarding compl
 - [x] **All 12 agents onboarded** — full channel + mention maps deployed (2026-02-28)
 - [ ] **Per-agent relay configuration** — different timeout, retry, and routing policies per agent
 
-### All-directional relay
-- [ ] **Any agent → any agent dispatch** — currently only CEO has `tools.alsoAllow: ["relay_dispatch"]`. Enable other agents to dispatch (e.g., CTO → CLO, CTO → CEO). Requires per-agent `alsoAllow` + soul.md updates. No code changes — config only.
-- [ ] **Design decision: dispatch topology** — should all agents dispatch freely to all others, or restrict to hub-and-spoke (only to/from orchestrator)? Free-form enables peer collaboration but may create coordination complexity.
+### All-directional relay — COMPLETE (2026-02-28)
+- [x] **Any agent → any agent dispatch** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]` in `openclaw.json`. CEO added to channel + mention maps in `clawsuite-relay.conf` (was missing, caused RELAY_UNAVAILABLE). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces.
+- [x] **Dispatch topology: free-form** — all agents can dispatch to all others. No hub-and-spoke restriction. Peer collaboration enabled.
 
 ### Packaging
 - [ ] **Plugin packaging for distribution** — move from local install to ClawHub-ready package

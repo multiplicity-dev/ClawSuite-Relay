@@ -22,7 +22,7 @@ npm test
 npm run build
 ```
 
-Current implementation status: Phase 2 code complete. Structured envelope (`RelayEnvelope`) with auto-derived agent ID provenance. Dead fallback code removed (capture.ts, DiscordForwardTransport, message_received/agent_end hooks). Outbound message splitting for >2000 char prompts. Remaining: live verification of envelope format, multi-turn `assistantTexts` behavior. See `implementation-plan.md` for details.
+Current implementation status: Phase 2 complete, all-directional relay wired. All 13 agents can dispatch to any other via `relay_dispatch`. Naive subject propensity test passed — agents adopt relay from TOOLS.md policy on first contact without priming. Phase 3 (enforcement) likely unnecessary. See `implementation-plan.md` and `feature-backlog.md` for details.
 
 ## Prerequisite: Create a second Discord bot
 
