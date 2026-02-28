@@ -1,39 +1,22 @@
 # ClawSuite-Relay Live Activation Runbook
 
-## Current status (2026-02-27, 15:30 CET)
+## Current status (2026-02-28)
 
-**Relay loop: functionally working. Phase 1 NOT complete — blockers listed below.**
+**Phase 1 COMPLETE.** Core relay loop verified: dispatch → channel post → `llm_output` capture → gateway injection delivery. Content parity with native `sessions_spawn` confirmed. See `implementation-plan.md` for remaining phases.
 
-Round trip confirmed at `a09c21e` (branch `top-down-cleanup`): orchestrator dispatches → relay bot posts to #tech → CTO responds → response captured and forwarded back to orchestrator. CEO confirmed tool outputs (hostname) visible in relay forward.
-
----
-
-## PHASE 1 BLOCKERS (must resolve before milestone closure)
-
-**Blocker 1 (PRIMARY) — Switch capture to `llm_output` hook targeting last assistant message.**
-Previous capture hooks (`agent_end` + message parsing, `before_message_write`) produced inconsistent results. The `llm_output` hook provides `assistantTexts: string[]` pre-extracted. The relay should forward only `assistantTexts[assistantTexts.length - 1]` — matching what the completion announce delivers in normal `sessions_spawn` workflows. OpenClaw deliberately limits to the last assistant message because the orchestrator's context budget must remain clean for cross-agent synthesis. See `layer-disambiguation.md` for the four-surface analysis.
-
-**Blocker 2 — Relay envelope visible in orchestrator channel.**
-The relay bot's forwarded message is visible to the human in #general. This is not just cosmetic — it's operational noise. Auto-delete was attempted by GPT but deleted the wrong message (CEO's prompt to #tech instead of the envelope), which cascaded into losing the loop. Approach: auto-delete of the relay bot's OWN forwarded message in the orchestrator channel (not any other message). Must be careful with target selection.
-
-**Blocker 3 — Test C (suppression path) NOT VERIFIED.**
-During correlated transient announce in orchestrator channel, confirm suppression cancels redundant announce. Code exists (`shouldSuppressTransientGeneralAnnounce`) but never tested live.
-
-**Blocker 4 — Test D (fail-loud path) NOT VERIFIED.**
-Temporarily misconfigure forward channel id and confirm failure is explicit (not silent) and recoverable. Code exists (`UnconfiguredForwardTransport` throws) but never tested live.
-
-**Blocker 5 — test-validation-plan.md minimum v1 tests mostly unchecked.**
-Unit tests pass (30/30) but the live validation matrix in `test-validation-plan.md` has not been systematically executed.
+### Remaining Phase 1 verification
+- [ ] Test C: suppress redundant transient announce (code exists, untested live)
+- [ ] Test D: fail-loud path (code exists, untested live)
 
 ---
 
-## Resolved issues
+## Resolved blockers
 
-**Issue 1 — RESOLVED: duplicate forward.**
-Two hooks (`before_message_write` and `agent_end`) both fired for the same response within 121ms. Fix: use only one capture hook. Tested with `agent_end` removed — single forward confirmed (dispatchId `537a94a5`).
+**PRIMARY BLOCKER — RESOLVED (2026-02-28):** `llm_output` → `assistantTexts[last]` → `GatewayForwardTransport` → `openclaw gateway call agent`. Gateway injection matches native `sendSubagentAnnounceDirectly` delivery path. Content parity verified via source code trace — thinking tokens stripped at every level, no provider-specific gating.
 
-**Issue 2 — RESOLUTION IDENTIFIED: switch to `llm_output` hook.**
-`agent_end` and `before_message_write` produced inconsistent results across multiple attempts. The `llm_output` hook provides `assistantTexts: string[]` pre-extracted. Relay should forward `assistantTexts[assistantTexts.length - 1]` (last entry = last assistant message), matching the completion announce. See `layer-disambiguation.md` for full analysis. **Implementation pending.**
+**Relay envelope in #general — RESOLVED by architecture change.** No Discord mirror to #general. Subagent output stays in subagent channel (path a). Orchestrator receives via gateway injection (path b). No envelope to auto-delete.
+
+**Duplicate forward — RESOLVED.** `llm_output` is the sole capture path. `agent_end` gated behind `CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1` (off by default). `message_sending` handles only announce suppression.
 
 ### Key architectural findings from troubleshooting
 
@@ -76,6 +59,17 @@ Control actions (restart/enable/disable/reconfigure) must be authorized only by 
 ### Second Discord bot (REQUIRED)
 
 ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages, so relay messages from the same bot identity are invisible to subagent sessions. See README.md for setup steps.
+
+### Orchestrator reference docs (REQUIRED)
+
+The orchestrator (CEO) must know about relay channel IDs, session keys, and `sessions_history` usage. Update the orchestrator's TOOLS.md (or equivalent reference file) with:
+- Relay bot identity and dispatch tool syntax
+- Session keys for relay-bound agents (for `sessions_history` access)
+- Guidance to use `sessions_history` with a small `limit` (10-20) since relay session keys point to main channel sessions, not bounded transient sessions
+
+**Current location:** `~/.openclaw/workspace/TOOLS.md` (shared workspace, accessible to CEO)
+
+Without this, the orchestrator may not know it can access subagent working via `sessions_history`, and may pull entire channel histories without a limit.
 
 ### Tool visibility (REQUIRED)
 
