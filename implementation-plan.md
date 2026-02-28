@@ -56,14 +56,17 @@ Status: Phase 1 COMPLETE (core loop verified). Phase 2 next (delivery enrichment
 - [ ] **Verify `assistantTexts` array structure for multi-turn responses** — when a subagent reasons across multiple turns (tool calls, intermediate messages), how many entries are in `assistantTexts`? Does `[last]` always capture the final answer, or can it capture an intermediate turn? Test with a task that requires tool use.
 - [ ] **Verify outbound prompt delivery for >2000 char prompts** — the relay bot posts prompts to the subagent channel via Discord. If the CEO composes a >2000 char prompt, does `postToChannel` handle splitting? (This is the outbound direction, not the return path.)
 
-### Cleanup stale message format
+### Structured message envelope
+- [ ] **Adopt structured envelope based on standards research** — see `envelope-research.md` for recommended structure drawing from A2A, AutoGen, IETF drafts, MCP, CloudEvents. Key additions: explicit `source`/`target`, `delegationChain` provenance, `_meta` extension namespace, envelope/data separation.
+- [ ] **Gateway injection path: JSON envelope** — replace current text-with-markers trigger message with JSON-serialized envelope. The orchestrator receives structured data instead of parsing text markers.
+- [ ] **Discord channel path: human-readable envelope** — outbound dispatch prompts should retain readability while carrying structured metadata. Design choice: embed fields, JSON code block, or structured prefix.
 - [ ] **Remove redundant metadata from older code paths** — the `message_received` capture path and `agent_end` fallback may still produce old-format envelopes. Audit and clean up.
-- [ ] **Standardize relay envelope markers** — ensure `[relay_dispatch_id:]` and `[relay_subagent_message_id:]` are used consistently, remove any vestigial markers from earlier iterations.
 
 ### Acceptance — Phase 2
 - [ ] CEO calls `sessions_history` with limit on a relay dispatch when needed
 - [ ] Multi-turn subagent responses deliver correct `assistantTexts[last]`
-- [ ] Trigger message format matches design-decisions.md §4
+- [ ] Trigger message format uses structured envelope (design-decisions.md §10)
+- [ ] `delegationChain` present in relay messages
 - [ ] No stale envelope formats in active code paths
 
 ---

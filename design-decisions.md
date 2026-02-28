@@ -216,5 +216,36 @@ CLI subprocess adds ~100-200ms latency per delivery. Acceptable for the relay us
 
 ---
 
+## §10. Message Envelope Design Direction
+
+### Decision
+Adopt structured envelope patterns from existing agent-to-agent standards rather than inventing ad-hoc formats. Defer cryptographic signing (HMAC/JWT) until the relay crosses trust boundaries.
+
+### Research basis
+Survey of 7+ standards documented in `envelope-research.md`. Key sources: A2A protocol (Google/LF), AutoGen (Microsoft), IETF agent:// and agentic-jwt drafts, MCP `_meta` convention, CloudEvents envelope/data separation.
+
+### Patterns adopted
+
+| Pattern | Source | Current state |
+|---|---|---|
+| Envelope/data separation | CloudEvents | Current trigger message mixes `[relay_dispatch_id:]` markers with `Result:` content. Proposed: structured envelope with content in a dedicated field. |
+| `source` / `target` identity | AutoGen, A2A | Currently implicit (relay bot is the poster). Proposed: explicit sender/receiver fields. |
+| `dispatchId` as correlation | A2A `contextId` | Already implemented. Validated by A2A's identical pattern. |
+| `delegationChain` provenance | IETF agent:// | New. Tracks `["president", "ceo", "systems-eng"]` — who asked whom. Serves the transparency goal. |
+| `_meta` extension namespace | MCP | New. System metadata (session keys, message IDs) in a reserved namespace, separate from content. |
+
+### Patterns deferred
+- **HMAC / JWT signing** — single-system deployment, no trust boundary crossing. Revisit if relay goes cross-host.
+- **`agent://` URI scheme** — formal addressing not needed within a single Discord guild.
+- **Capability negotiation** — relay targets are statically configured.
+
+### Impact on implementation
+The envelope structure should be designed as part of Phase 2 (delivery enrichment). The gateway injection path should adopt JSON serialization for the envelope. The Discord channel path can retain human-readable formatting with envelope metadata in a structured prefix or embed.
+
+See `envelope-research.md` for the full survey, recommended structure, and serialization considerations.
+
+---
+
 ## Changelog
 - 2026-02-28: Initial document. Sections 1-9 covering surfaces model, content parity, prompting, trigger message, multi-message handling, session key semantics, gateway injection, factory pattern, callGateway import.
+- 2026-02-28: Added §10 — message envelope design direction, referencing envelope-research.md.

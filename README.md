@@ -8,6 +8,7 @@ Routes orchestrator delegation into subagent channels for transparent prompt/res
 - `relay-bot-plan.md` — architecture and rationale
 - `technical-design-doc.md` — implementation contract + documentation policy
 - `design-decisions.md` — key design rationale, trade-offs, and technical insights
+- `envelope-research.md` — agent message envelope standards survey (A2A, AutoGen, IETF, MCP, CloudEvents)
 - `layer-disambiguation.md` — four-surface model and content parity verification
 - `implementation-plan.md` — milestones and acceptance gates
 - `dev-log.md` — chronological decisions/evidence
