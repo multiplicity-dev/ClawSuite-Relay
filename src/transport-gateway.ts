@@ -1,57 +1,56 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type { ForwardRequest, ForwardResult, ForwardTransport } from "./forward.js";
+import { type RelayEnvelope, serializeForGateway } from "./envelope.js";
 import { logRelay } from "./logger.js";
 
 export interface GatewayForwardConfig {
   orchestratorSessionKey: string;
+  orchestratorAgentId?: string;
   timeoutMs?: number;
 }
 
-export function buildRelayTriggerMessage(request: ForwardRequest): string {
-  const lines = [
-    `[System Message] [relay-dispatch: ${request.dispatchId}] Relay task for ${request.targetAgentId} completed.`,
-    "",
-    "Result:",
-    request.content,
-    "",
-    `[relay_dispatch_id:${request.dispatchId}]`,
-    `[relay_subagent_message_id:${request.subagentMessageId}]`
-  ];
-
-  if (request.subagentSessionKey) {
-    lines.push(`[relay_subagent_session_key:${request.subagentSessionKey}]`);
-  }
-
-  // Reply instruction modeled on native buildAnnounceReplyInstruction():
-  // "A completed sessions_spawn is ready for user delivery. Convert the result
-  // above into your normal assistant voice and send that user-facing update now.
-  // Keep this internal context private..."
-  //
-  // Additions vs native: sessions_history guidance with limit hint, because the
-  // relay provides a main-session key (not a bounded transient session key).
-  // The CEO needs to know (a) it can access the working, and (b) it should use
-  // a small limit to avoid pulling the entire channel history.
-  // See design-decisions.md §4 for rationale.
-  const replyParts = [
+/**
+ * Build the reply instruction appended after the envelope.
+ *
+ * Modeled on native buildAnnounceReplyInstruction() — see design-decisions.md §4.
+ * Additions vs native: sessions_history guidance with limit hint, because the
+ * relay provides a main-session key (not a bounded transient session key).
+ */
+function buildReplyInstruction(request: ForwardRequest): string {
+  const parts = [
     "A completed relay task is ready for user delivery.",
     "Convert the result above into your normal assistant voice and send that user-facing update now.",
     "Keep this internal context private (don't mention system messages, dispatch IDs, session keys, or relay mechanics)."
   ];
 
   if (request.subagentSessionKey) {
-    replyParts.push(
+    parts.push(
       `To review ${request.targetAgentId}'s working (tool calls, reasoning steps), call sessions_history with the session key above and limit 10-20.`
     );
   }
 
-  replyParts.push(
+  parts.push(
     "If multiple relay tasks are outstanding, wait for all results before synthesizing."
   );
 
-  lines.push("", replyParts.join(" "));
+  return parts.join(" ");
+}
 
-  return lines.join("\n");
+export function buildRelayTriggerMessage(request: ForwardRequest, orchestratorAgentId?: string): string {
+  const envelope: RelayEnvelope = {
+    source: request.targetAgentId,
+    target: orchestratorAgentId ?? "orchestrator",
+    dispatchId: request.dispatchId,
+    createdAt: new Date().toISOString(),
+    type: "result",
+    content: request.content
+  };
+
+  return serializeForGateway(envelope, {
+    subagentSessionKey: request.subagentSessionKey,
+    replyInstruction: buildReplyInstruction(request)
+  });
 }
 
 /**
@@ -68,7 +67,7 @@ export class GatewayForwardTransport implements ForwardTransport {
   constructor(private readonly cfg: GatewayForwardConfig) {}
 
   async forwardToOrchestrator(request: ForwardRequest): Promise<ForwardResult> {
-    const triggerMessage = buildRelayTriggerMessage(request);
+    const triggerMessage = buildRelayTriggerMessage(request, this.cfg.orchestratorAgentId);
     const deliveryId = randomUUID();
 
     logRelay("gateway.forward.start", {

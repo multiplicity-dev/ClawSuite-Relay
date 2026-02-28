@@ -9,7 +9,7 @@ process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
 process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
 
 const { relay_dispatch } = await import("../src/index.js");
-const { captureSubagentResponse } = await import("../src/capture.js");
+const { loadDispatch, updateDispatch } = await import("../src/state.js");
 const { shouldSuppressTransientGeneralAnnounce } = await import("../src/announce-filter.js");
 
 test.after(async () => {
@@ -47,15 +47,10 @@ test("suppresses when marker references known dispatch in orchestrator channel",
     { transport: { async postToChannel() { return { messageId: "post-a2" }; } } }
   );
 
-  await captureSubagentResponse(
-    {
-      channelId: "systems-eng-channel",
-      messageId: "sub-msg-marker-ready",
-      referencedMessageId: "post-a2",
-      content: "done marker"
-    },
-    { forwardTransport: { async forwardToOrchestrator() { return { messageId: "fwd-marker-ready" }; } } }
-  );
+  // Move dispatch to suppressible state via direct state update.
+  const saved = await loadDispatch(dispatch.dispatchId!);
+  assert.ok(saved);
+  await updateDispatch({ ...saved, state: "COMPLETED", subagentResponseMessageId: "sub-msg-marker-ready" });
 
   const suppress = await shouldSuppressTransientGeneralAnnounce(
     {
@@ -98,20 +93,15 @@ test("does not suppress marker for failed dispatch state", async () => {
 });
 
 test("suppresses when related subagent message id maps to dispatch", async () => {
-  await relay_dispatch(
+  const dispatch2 = await relay_dispatch(
     { targetAgentId: "systems-eng", task: "work2", requestId: "ann-2" },
     { transport: { async postToChannel() { return { messageId: "post-b" }; } } }
   );
 
-  await captureSubagentResponse(
-    {
-      channelId: "systems-eng-channel",
-      messageId: "sub-msg-ann",
-      referencedMessageId: "post-b",
-      content: "done"
-    },
-    { forwardTransport: { async forwardToOrchestrator() { return { messageId: "fwd-ann" }; } } }
-  );
+  // Move dispatch to suppressible state with known subagent message ID.
+  const saved2 = await loadDispatch(dispatch2.dispatchId!);
+  assert.ok(saved2);
+  await updateDispatch({ ...saved2, state: "COMPLETED", subagentResponseMessageId: "sub-msg-ann" });
 
   const suppress = await shouldSuppressTransientGeneralAnnounce(
     {

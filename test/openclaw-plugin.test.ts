@@ -34,15 +34,12 @@ test("registers hooks and relay_dispatch tool factory", () => {
   const { api, hooks, tools } = createMockApi();
   register(api);
 
-  // message_received is only registered when CLAWSUITE_RELAY_USE_MESSAGE_RECEIVED_CAPTURE=1
-  assert.equal(hooks.message_received, undefined);
-  assert.equal(typeof hooks.message_sending, "function");
+  // Only two hooks: llm_output (capture + delivery) and message_sending (suppression)
   assert.equal(typeof hooks.llm_output, "function");
-  // agent_end is only registered when CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1
+  assert.equal(typeof hooks.message_sending, "function");
+  assert.equal(hooks.message_received, undefined);
   assert.equal(hooks.agent_end, undefined);
-  assert.equal(hooks.before_message_write, undefined);
   assert.equal(tools.length, 1);
-  // Tool is registered as a factory (function), not a static tool
   assert.equal(typeof tools[0].tool, "function");
 });
 

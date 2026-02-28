@@ -22,7 +22,7 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 — PRIMARY BLOCKER RESOLVED. Full relay loop operational: dispatch → channel post → `llm_output` capture → gateway injection delivery. Content parity with native `sessions_spawn` verified. Remaining: suppression live test, fail-loud live test, >2000 char payload handling. See `implementation-plan.md` for details.
+Current implementation status: Phase 2 code complete. Structured envelope (`RelayEnvelope`) with auto-derived agent ID provenance. Dead fallback code removed (capture.ts, DiscordForwardTransport, message_received/agent_end hooks). Outbound message splitting for >2000 char prompts. Remaining: live verification of envelope format, multi-turn `assistantTexts` behavior. See `implementation-plan.md` for details.
 
 ## Prerequisite: Create a second Discord bot
 
@@ -57,8 +57,7 @@ Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 
 ## OpenClaw runtime hook wiring
 This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.json`) that wires:
-- `llm_output` → **primary capture path**: provides `assistantTexts: string[]` pre-extracted. Relay forwards the last entry (`assistantTexts[assistantTexts.length - 1]`), matching what the completion announce delivers in normal `sessions_spawn` workflows
-- `message_received` → subagent response capture (fallback path for external bot messages)
+- `llm_output` → **capture + delivery**: provides `assistantTexts: string[]` pre-extracted. Relay forwards the last entry via gateway injection, matching what the completion announce delivers in normal `sessions_spawn` workflows
 - `message_sending` → announce suppression in orchestrator channel
 - `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
 

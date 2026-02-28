@@ -134,15 +134,22 @@ export interface ArmedDispatchRecord {
   dispatchId: string;
   armedAt: string;
   orchestratorSessionKey?: string;
+  orchestratorAgentId?: string;
 }
 
-export async function setArmedDispatch(targetAgentId: string, dispatchId: string, orchestratorSessionKey?: string) {
+export async function setArmedDispatch(
+  targetAgentId: string,
+  dispatchId: string,
+  orchestratorSessionKey?: string,
+  orchestratorAgentId?: string
+) {
   await ensureArmedDir();
   const rec: ArmedDispatchRecord = {
     targetAgentId,
     dispatchId,
     armedAt: new Date().toISOString(),
-    ...(orchestratorSessionKey ? { orchestratorSessionKey } : {})
+    ...(orchestratorSessionKey ? { orchestratorSessionKey } : {}),
+    ...(orchestratorAgentId ? { orchestratorAgentId } : {})
   };
   const p = join(getArmedDir(), `${targetAgentId}.json`);
   await writeFile(p, JSON.stringify(rec, null, 2), "utf8");

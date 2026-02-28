@@ -293,7 +293,74 @@ The models process the same messages they would in native `sessions_spawn`: the 
 
 ---
 
+## §12. Structured Envelope Field Rationale
+
+### Decision
+Use a 6-field `RelayEnvelope` type for all relay messages. Identity uses agent IDs (auto-derived from OpenClaw config, no additional configuration needed).
+
+### Included fields
+
+| Field | Function | Standard source |
+|---|---|---|
+| `source` | Identifies the originator — the orchestrator agent on dispatch, the subagent on result. Replaces opaque session keys with readable agent IDs. | AutoGen, A2A |
+| `target` | Identifies the receiver. Enables correct routing and provides context to the recipient. | AutoGen, A2A |
+| `dispatchId` | Correlates dispatch with its result. Used by announce suppression to identify which orchestrator announce to cancel. | A2A `contextId` |
+| `createdAt` | Temporal context. If a dispatch takes time, the orchestrator knows when it was initiated. Low overhead. | CloudEvents |
+| `type` | Drives serialization — dispatch prompts go to Discord (human-readable), results go via gateway (machine-to-machine). | CloudEvents |
+| `content` | The payload. On dispatch: task prompt. On result: `assistantTexts[last]`. Separated from envelope metadata (CloudEvents data separation principle). | A2A Message, CloudEvents |
+
+### Excluded fields
+
+| Field | Standard source | Why excluded |
+|---|---|---|
+| `delegationChain` | IETF agent:// | Current system has only two-hop chains (orchestrator → subagent). CEO already knows it dispatched. Multi-hop delegation doesn't exist. Add when needed. |
+| `_meta` | MCP | No metadata currently needs an extension namespace. Session keys and message IDs are already in the trigger message as tagged markers. Add when extension metadata arises. |
+| Channel names | — | Agent IDs (`"systems-eng"`, `"ceo"`) are sufficiently readable. Channel name resolution requires Discord API calls with no proportional benefit. |
+| Cryptographic signing | IETF agentic-jwt | Single-system deployment, no trust boundary crossing. Revisit if relay goes cross-host. |
+| `agent://` URI scheme | IETF agent:// | Formal addressing not needed within a single Discord guild. |
+| Capability negotiation | A2A | Relay targets are statically configured via env vars. |
+
+### Identity: auto-derived from OpenClaw config
+
+Agent IDs flow into the relay from `OpenClawPluginToolContext.agentId` (tool factory receives the orchestrator's ID) and hook context `ctx.agentId` (identifies the subagent). Both are the `id` field from `openclaw.json` — human-readable strings chosen by the user (e.g., `"ceo"`, `"systems-eng"`). No separate display name layer exists in OpenClaw.
+
+The `orchestratorAgentId` is captured from the tool factory context at dispatch time and stored in `ArmedDispatchRecord` so it's available when building the result trigger message.
+
+### Two serialization contexts
+
+| Context | Serializer | Audience | Example |
+|---|---|---|---|
+| Gateway injection | `serializeForGateway` | Orchestrator (machine-to-machine) | `Relay result from systems-eng → ceo` |
+| Discord channel | `serializeForDiscord` | Human reader + subagent | `[relay_dispatch_id:...] from ceo` |
+
+### Future considerations noted
+
+- **Identity masking**: Using Discord webhooks to post as the originator's identity instead of the relay bot. Relevant if permanent-to-permanent subagent communication is added.
+- **Multi-hop delegation chains**: If agent A dispatches to agent B which dispatches to agent C, a `delegationChain` field would provide provenance. Not needed for current two-hop architecture.
+
+---
+
+## §13. Outbound Message Splitting
+
+### Decision
+When an outbound dispatch prompt exceeds Discord's 2000-char limit, split the task content across multiple messages. The envelope footer (dispatch marker + source) appears only on the last message.
+
+### Why
+The >2000-char limit applies ONLY to outbound dispatch prompts posted to Discord channels. The return path (gateway injection via `openclaw gateway call agent`) has no such limit — verified with 4001-char payloads. The theoretical limit on the return path is the `maxBuffer` setting (2MB) on the `execFile` call.
+
+Previously, the relay threw an error for prompts exceeding 2000 chars. With the structured envelope adding ~100 chars of footer overhead, the effective task prompt limit would drop to ~1900 chars — too restrictive for detailed task prompts.
+
+### How it works
+1. If the formatted message fits in 2000 chars, post as a single message (no change)
+2. Otherwise, split the raw task content at paragraph boundaries (`\n\n`), falling back to line breaks (`\n`), then hard-splitting at the character limit
+3. Mention prefix goes on the first chunk, envelope footer on the last chunk
+4. Chunks are posted sequentially via the Discord API
+5. Return the message ID of the last chunk (for reply correlation)
+
+---
+
 ## Changelog
 - 2026-02-28: Initial document. Sections 1-9 covering surfaces model, content parity, prompting, trigger message, multi-message handling, session key semantics, gateway injection, factory pattern, callGateway import.
 - 2026-02-28: Added §10 — message envelope design direction, referencing envelope-research.md.
 - 2026-02-28: Added §11 — value proposition: persistence without token overhead.
+- 2026-02-28: Added §12 — structured envelope field rationale (included/excluded fields). Added §13 — outbound message splitting.

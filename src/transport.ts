@@ -2,6 +2,7 @@ export interface RelayPostRequest {
   dispatchId: string;
   targetAgentId: string;
   task: string;
+  sourceAgentId?: string;
 }
 
 export interface RelayPostResult {

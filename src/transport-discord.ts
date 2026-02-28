@@ -1,11 +1,10 @@
 import type { RelayPostRequest, RelayPostResult, RelayTransport } from "./transport.js";
-import type { ForwardRequest, ForwardResult, ForwardTransport } from "./forward.js";
+import { type RelayEnvelope, serializeForDiscord } from "./envelope.js";
 
 interface DiscordRelayConfig {
   botToken: string;
   channelsByAgent: Record<string, string>;
   mentionsByAgent?: Record<string, string>;
-  orchestratorChannelId?: string;
 }
 
 const DISCORD_MAX_CONTENT = 2000;
@@ -39,21 +38,41 @@ async function postDiscordMessage(
   return (await response.json()) as { id: string };
 }
 
-export function buildRelayContent(request: RelayPostRequest, mentionUserId?: string): string {
-  const mention = mentionUserId ? `<@${mentionUserId}>\n` : "";
-  const marker = `\n\n[relay_dispatch_id:${request.dispatchId}]`;
-  return `${mention}${request.task}${marker}`;
+export function buildRelayContent(request: RelayPostRequest, opts?: { mentionUserId?: string; sourceAgentId?: string }): string {
+  const envelope: RelayEnvelope = {
+    source: opts?.sourceAgentId ?? "relay",
+    target: request.targetAgentId,
+    dispatchId: request.dispatchId,
+    createdAt: new Date().toISOString(),
+    type: "dispatch",
+    content: request.task
+  };
+
+  return serializeForDiscord(envelope, { mentionUserId: opts?.mentionUserId });
 }
 
-export function buildForwardContent(request: ForwardRequest): string {
-  return [
-    `Subagent response received for ${request.targetAgentId}.`,
-    "",
-    request.content,
-    "",
-    `[relay_dispatch_id:${request.dispatchId}]`,
-    `[relay_subagent_message_id:${request.subagentMessageId}]`
-  ].join("\n");
+/**
+ * Split text into chunks that each fit within maxLen characters.
+ * Prefers splitting at paragraph boundaries (\n\n), falls back to
+ * line breaks (\n), then hard-splits at maxLen.
+ */
+export function splitText(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLen) {
+    let splitAt = remaining.lastIndexOf("\n\n", maxLen);
+    if (splitAt <= 0) splitAt = remaining.lastIndexOf("\n", maxLen);
+    if (splitAt <= 0) splitAt = maxLen;
+
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  if (remaining.trim()) chunks.push(remaining);
+  return chunks;
 }
 
 export class DiscordRelayTransport implements RelayTransport {
@@ -67,31 +86,38 @@ export class DiscordRelayTransport implements RelayTransport {
     const mentionUserId = this.cfg.mentionsByAgent?.[request.targetAgentId];
     if (mentionUserId) validateSnowflake(mentionUserId, `mention user id for ${request.targetAgentId}`);
 
-    const content = buildRelayContent(request, mentionUserId);
-    if (content.length > DISCORD_MAX_CONTENT) {
-      throw new Error(`Payload too long for Discord (${content.length} > ${DISCORD_MAX_CONTENT})`);
+    const content = buildRelayContent(request, { mentionUserId, sourceAgentId: request.sourceAgentId });
+
+    // Single message if it fits
+    if (content.length <= DISCORD_MAX_CONTENT) {
+      const json = await postDiscordMessage(this.cfg.botToken, channelId, content);
+      return { messageId: json.id };
     }
 
-    const json = await postDiscordMessage(this.cfg.botToken, channelId, content);
-    return { messageId: json.id };
-  }
-}
+    // Multi-message: split the task content, prepend mention to first chunk,
+    // append envelope footer to last chunk.
+    const mentionPrefix = mentionUserId ? `<@${mentionUserId}>\n` : "";
+    const footer = `\n\n[relay_dispatch_id:${request.dispatchId}] from ${request.sourceAgentId ?? "relay"}`;
 
-export class DiscordForwardTransport implements ForwardTransport {
-  constructor(private readonly cfg: DiscordRelayConfig) {}
+    // Reserve space for mention/footer in first/last chunk
+    const firstMaxLen = DISCORD_MAX_CONTENT - mentionPrefix.length;
+    const lastMaxLen = DISCORD_MAX_CONTENT - footer.length;
+    const middleMaxLen = DISCORD_MAX_CONTENT;
 
-  async forwardToOrchestrator(request: ForwardRequest): Promise<ForwardResult> {
-    const channelId = this.cfg.orchestratorChannelId;
-    if (!channelId) throw new Error("Missing orchestrator channel id");
-    validateSnowflake(channelId, "orchestrator channel id");
+    // Split the raw task text
+    const taskChunks = splitText(request.task, Math.min(firstMaxLen, lastMaxLen, middleMaxLen));
 
-    const content = buildForwardContent(request);
-    if (content.length > DISCORD_MAX_CONTENT) {
-      throw new Error(`Forward payload too long for Discord (${content.length} > ${DISCORD_MAX_CONTENT})`);
+    let lastMessageId = "";
+    for (let i = 0; i < taskChunks.length; i++) {
+      let msg = taskChunks[i];
+      if (i === 0) msg = mentionPrefix + msg;
+      if (i === taskChunks.length - 1) msg = msg + footer;
+
+      const json = await postDiscordMessage(this.cfg.botToken, channelId, msg);
+      lastMessageId = json.id;
     }
 
-    const json = await postDiscordMessage(this.cfg.botToken, channelId, content);
-    return { messageId: json.id };
+    return { messageId: lastMessageId };
   }
 }
 
@@ -122,16 +148,3 @@ export function transportFromEnv(): DiscordRelayTransport {
   return new DiscordRelayTransport({ botToken, channelsByAgent, mentionsByAgent });
 }
 
-export function forwardTransportFromEnv(): DiscordForwardTransport {
-  const botToken = process.env.CLAWSUITE_RELAY_BOT_TOKEN;
-  const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
-
-  if (!botToken) throw new Error("Missing CLAWSUITE_RELAY_BOT_TOKEN");
-  if (!orchestratorChannelId) throw new Error("Missing CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID");
-
-  return new DiscordForwardTransport({
-    botToken,
-    channelsByAgent: {},  // unused by forwardToOrchestrator; required by shared config type
-    orchestratorChannelId
-  });
-}

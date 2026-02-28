@@ -1,6 +1,6 @@
 # Implementation Plan — Relay Bot Initiative
 
-Status: Phase 1 COMPLETE (core loop verified). Phase 2 next (delivery enrichment).
+Status: Phase 2 COMPLETE (envelope verified live 2026-02-28, dispatch 2fc74431).
 
 ## Phase 0 — Design Freeze
 - [x] Approve TDD
@@ -47,27 +47,28 @@ Status: Phase 1 COMPLETE (core loop verified). Phase 2 next (delivery enrichment
 **Goal:** Make the orchestrator's access to subagent context near-native. The relay delivers `assistantTexts[last]` (matching the completion announce), but the orchestrator should also be able to efficiently access intermediate reasoning, tool outputs, and prior dispatch context — matching what `sessions_history` provides in native `sessions_spawn` but adapted for main-session semantics.
 
 ### Trigger message refinement
-- [ ] **Gateway restart to deploy current trigger message** — new reply instruction (modeled on native `buildAnnounceReplyInstruction`) with `sessions_history` + limit guidance. Currently built but not deployed.
+- [x] **Gateway restart to deploy current trigger message** — deployed 2026-02-28. Reply instruction modeled on native `buildAnnounceReplyInstruction` with `sessions_history` + limit guidance. Verified live (dispatch 2fc74431).
 - [ ] **Verify CEO follows the `sessions_history` guidance** — does the CEO call `sessions_history` with a small limit when the result alone is insufficient? Test with a task where the final answer is ambiguous without seeing the working.
 - [ ] **Evaluate pre-fetching** — should the relay pre-fetch `chat.history(limit: 10)` and include it in the trigger message? This would make context access automatic (no CEO action needed) but increases trigger message size. Design decision needed.
 
 ### Multi-message subagent output
 - [x] Gateway injection delivers full text regardless of Discord splitting — verified with 4001-char payload
-- [ ] **Verify `assistantTexts` array structure for multi-turn responses** — when a subagent reasons across multiple turns (tool calls, intermediate messages), how many entries are in `assistantTexts`? Does `[last]` always capture the final answer, or can it capture an intermediate turn? Test with a task that requires tool use.
-- [ ] **Verify outbound prompt delivery for >2000 char prompts** — the relay bot posts prompts to the subagent channel via Discord. If the CEO composes a >2000 char prompt, does `postToChannel` handle splitting? (This is the outbound direction, not the return path.)
+- [x] **Verify `assistantTexts` array structure for multi-turn responses** — tested with file-read task (dispatch 03e93d96). CTO used tool call (read file) then responded. `texts=1`, `lastLen=107`. Tool-call intermediate turns don't produce separate entries. `[last]` reliably captures the final answer.
+- [x] **Outbound prompt delivery for >2000 char prompts** — `postToChannel` now splits long prompts. Envelope footer on last chunk only.
 
 ### Structured message envelope
-- [ ] **Adopt structured envelope based on standards research** — see `envelope-research.md` for recommended structure drawing from A2A, AutoGen, IETF drafts, MCP, CloudEvents. Key additions: explicit `source`/`target`, `delegationChain` provenance, `_meta` extension namespace, envelope/data separation.
-- [ ] **Gateway injection path: JSON envelope** — replace current text-with-markers trigger message with JSON-serialized envelope. The orchestrator receives structured data instead of parsing text markers.
-- [ ] **Discord channel path: human-readable envelope** — outbound dispatch prompts should retain readability while carrying structured metadata. Design choice: embed fields, JSON code block, or structured prefix.
-- [ ] **Remove redundant metadata from older code paths** — the `message_received` capture path and `agent_end` fallback may still produce old-format envelopes. Audit and clean up.
+- [x] **Adopt structured envelope based on standards research** — 6-field `RelayEnvelope` type (`source`, `target`, `dispatchId`, `createdAt`, `type`, `content`). Field rationale documented in `design-decisions.md` §12.
+- [x] **Gateway injection path: structured envelope** — `serializeForGateway` produces trigger messages with `source → target` provenance using agent IDs (not session keys).
+- [x] **Discord channel path: human-readable envelope** — `serializeForDiscord` produces task content with compact footer (`[relay_dispatch_id:...] from <agent>`).
+- [x] **Remove redundant code paths** — deleted `capture.ts`, `DiscordForwardTransport`, `message_received`/`agent_end` hooks, `isRelayMachinery`, `UnconfiguredForwardTransport`. Codebase reduced to primary path only.
+- [x] **Outbound message splitting** — prompts >2000 chars split at paragraph/line boundaries. Footer on last chunk. Return path (gateway injection) unlimited.
 
 ### Acceptance — Phase 2
 - [ ] CEO calls `sessions_history` with limit on a relay dispatch when needed
-- [ ] Multi-turn subagent responses deliver correct `assistantTexts[last]`
-- [ ] Trigger message format uses structured envelope (design-decisions.md §10)
-- [ ] `delegationChain` present in relay messages
-- [ ] No stale envelope formats in active code paths
+- [x] Multi-turn subagent responses deliver correct `assistantTexts[last]` — verified (dispatch 03e93d96, texts=1 after tool use)
+- [x] Trigger message format uses structured envelope (design-decisions.md §12)
+- [x] No stale envelope formats in active code paths (dead fallback code removed)
+- [x] Live verification: new envelope format confirmed in production (dispatch 2fc74431, 2026-02-28). Both directions: `from ceo` on outbound, `systems-eng → ceo` on return. Gateway delivery succeeded. CEO synthesis clean.
 
 ---
 

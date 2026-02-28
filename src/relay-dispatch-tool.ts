@@ -51,7 +51,7 @@ export function createRelayDispatchToolFactory(transport: RelayTransport | undef
 
         const result = await relay_dispatch(
           { targetAgentId, task, requestId },
-          { transport, orchestratorSessionKey }
+          { transport, orchestratorSessionKey, orchestratorAgentId: ctx.agentId }
         );
 
         const text =

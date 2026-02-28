@@ -1285,3 +1285,20 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
 - Terminology correction: "Surfaces" (independent access paths) instead of "layers" (which implied hierarchy). Four surfaces: assistantTexts array, completion announce, sessions_history, raw JSONL.
 - Risk introduced: None. Documentation-only change.
 - Rollback note: N/A.
+
+- Date/Time: 2026-02-28
+- Author: systems-eng (Claude Opus 4.6)
+- Change: Phase 2 — clean architecture + structured envelope. Three-part implementation:
+  1. Dead fallback code removal (capture.ts, DiscordForwardTransport, message_received/agent_end hooks, 11 dead helpers). openclaw-plugin.ts reduced 454→197 lines.
+  2. Structured envelope (`RelayEnvelope`) with 6 fields: source, target, dispatchId, createdAt, type, content. Two serializers: `serializeForGateway` (machine-to-machine trigger messages) and `serializeForDiscord` (human-readable channel posts). Auto-derived agent ID provenance via `ctx.agentId` at dispatch time.
+  3. Outbound message splitting for >2000 char Discord prompts. `splitText` utility splits at paragraph/line boundaries. Footer on last chunk only.
+- Why: Clean up dead weight from abandoned fallback paths before adding features. Structured envelope provides clear provenance (agent IDs instead of opaque session keys) and follows OpenClaw's native `buildAnnounceReplyInstruction` pattern.
+- Evidence:
+  - 32/32 tests pass (10 new envelope tests, 4 new splitText tests)
+  - Armed dispatch record confirmed: `orchestratorAgentId: "ceo"` persisted
+  - Live test (dispatchId 2fc74431): CEO dispatched → CTO saw `from ceo` footer → CTO responded → gateway delivery succeeded → CEO received `Relay result from systems-eng → ceo` (new format) → CEO synthesized cleanly
+  - Discriminating test: old format `Relay task for systems-eng completed.` absent after restart; new format `Relay result from systems-eng → ceo` confirmed in journal
+  - CTO correctly identified provenance claim in inbound dispatch. Noted it's not cryptographically verified — intentional design decision (no trust boundary crossing in single-system deployment, documented in design-decisions.md §12)
+  - Reply instruction ("keep private") follows OpenClaw native standard: `buildAnnounceReplyInstruction` uses identical phrasing
+- Risk introduced: Low. Envelope format change could theoretically confuse agents unfamiliar with relay, but live test showed clean synthesis.
+- Rollback note: Revert Phase 2 commits on `top-down-cleanup` branch. No env var changes needed — envelope is code-only.
