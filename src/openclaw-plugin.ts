@@ -1,4 +1,4 @@
-import { transportFromEnv } from "./transport-discord.js";
+import { transportFromEnv, postDiscordMessage, splitText, DISCORD_MAX_CONTENT } from "./transport-discord.js";
 import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
 import { clearArmedDispatch, getArmedDispatch, loadDispatch, updateDispatch } from "./state.js";
 import { GatewayForwardTransport } from "./transport-gateway.js";
@@ -34,6 +34,23 @@ export default function register(api: PluginApi) {
   } catch {
     // webhook map parsing handled by transportFromEnv; no-op here
   }
+
+  // Reverse map: Discord channel ID → agent ID. Used by message_sending hook
+  // to resolve which agent owns a channel (hook context has no agentId).
+  let channelAgentMap: Record<string, string> = {};
+  try {
+    const raw = process.env.CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON;
+    if (raw) channelAgentMap = JSON.parse(raw) as Record<string, string>;
+  } catch { /* no-op */ }
+
+  // Source profiles for per-agent identity (username + avatar). Parsed here
+  // in addition to transportFromEnv() because the message_sending hook needs
+  // direct access outside the relay transport.
+  let sourceProfilesByAgent: Record<string, { username?: string; avatarUrl?: string }> | undefined;
+  try {
+    const raw = process.env.CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON;
+    if (raw) sourceProfilesByAgent = JSON.parse(raw) as Record<string, { username?: string; avatarUrl?: string }>;
+  } catch { /* no-op */ }
 
   // Register relay_dispatch as a tool factory — the factory receives
   // OpenClawPluginToolContext (including the orchestrator's sessionKey)
@@ -126,4 +143,66 @@ export default function register(api: PluginApi) {
       );
     }
   });
+
+  // Self-identity hook (EXPERIMENTAL — disabled by default).
+  //
+  // Intercepts outgoing Discord messages via message_sending, reposts via
+  // the agent's own channel webhook with configured username + avatar, then
+  // returns { cancel: true } to suppress native bot delivery.
+  //
+  // STATUS: Not working reliably as of 2026-03-01. The hook fires and the
+  // webhook post succeeds, but cancel has inconsistent behavior — sometimes
+  // suppresses native delivery (confirmed with minimal handler), sometimes
+  // doesn't (when webhook post is included). Root cause unclear; likely
+  // related to how OpenClaw dispatches plugin hooks vs the delivery
+  // pipeline's hook runner. See dev-log.md for full investigation notes.
+  //
+  // Enable with CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED=1 for testing.
+  // Upstream fix: OpenClaw issue #6821 (responseWebhook) would replace this.
+  const selfIdentityEnabled = process.env.CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED === "1"
+    && Object.keys(channelAgentMap).length > 0
+    && Object.keys(webhookMap).length > 0;
+
+  if (selfIdentityEnabled) {
+    api.on("message_sending", async (event: any) => {
+      if (event.metadata?.channel !== "discord") return;
+
+      // event.to uses "channel:SNOWFLAKE" format — strip prefix for map lookup
+      const rawTo: string = event.to;
+      const channelId = rawTo.startsWith("channel:") ? rawTo.slice(8) : rawTo;
+
+      const agentId = channelAgentMap[channelId];
+      if (!agentId) return;
+
+      const webhookUrl = webhookMap[agentId];
+      if (!webhookUrl) return;
+
+      const profile = sourceProfilesByAgent?.[agentId];
+      const username = profile?.username || agentId;
+      const avatarUrl = profile?.avatarUrl;
+
+      const payloadBase: Record<string, unknown> = {
+        username,
+        allowed_mentions: { parse: [] as string[] }
+      };
+      if (avatarUrl) payloadBase.avatar_url = avatarUrl;
+
+      // Webhook post is best-effort — errors must NOT propagate or the
+      // delivery code's catch{} swallows the cancel return value.
+      try {
+        const chunks = splitText(event.content, DISCORD_MAX_CONTENT);
+        for (const chunk of chunks) {
+          await postDiscordMessage(webhookUrl, { ...payloadBase, content: chunk });
+        }
+      } catch (err) {
+        api.logger.warn?.(`clawsuite-relay: self-identity webhook failed for ${agentId}: ${String(err)}`);
+      }
+
+      return { cancel: true };
+    });
+
+    api.logger.info?.(
+      `clawsuite-relay: self-identity hook active for ${Object.keys(channelAgentMap).length} channels`
+    );
+  }
 }

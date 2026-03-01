@@ -74,6 +74,17 @@ Default ARM TTL raised from 5 minutes to 30 minutes (`1800000` ms) in `openclaw-
 ### N. Transient retry for Discord API — COMPLETED
 `postDiscordMessage()` now retries transient failures (429, 500, 502, 503) with a budget of 2 retries (3 total attempts). 429: respects Discord's `Retry-After` header. 5xx: fixed 2-second backoff. Non-transient errors (400, 403, 404) fail immediately. This is the single write boundary where internal relay state becomes external reality — without retry, transient failures silently corrupt the orchestration graph.
 
+### R. Agent self-identity in own channel — IN PROGRESS (blocked)
+Agents' own messages appear as "openclaw APP" instead of their configured name/avatar. Webhook migration solved cross-channel identity (relay dispatches), but native delivery uses the bot token's single global identity.
+
+**Option A (native `responseWebhook`):** Tested in OpenClaw 2026.2.26 — config key rejected. Upstream issue #6821 tracks this. **Preferred solution when available.**
+
+**Option B (`message_sending` hook):** Implemented but disabled (`CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED=1` to enable). Posts via webhook with agent identity, returns `{ cancel: true }` to suppress native delivery. **Problem:** Plugin hook return values are not reliably fed back to the delivery pipeline. Cancel works with a minimal handler but fails when a webhook post is included — both messages appear. Root cause not fully determined. See dev-log 2026-03-01 for full investigation.
+
+**Infrastructure in place:** `postDiscordMessage` and `DISCORD_MAX_CONTENT` exported from transport. `CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON` configured. Hook handler with try/catch isolation, chunking support, and source profile lookup. 6 tests.
+
+**Next steps to try:** (1) Monitor OpenClaw #6821 for native fix. (2) Investigate internal hooks vs plugin hooks for delivery control. (3) Bot message deletion fallback using Discord API.
+
 ### O. Per-agent relay configuration
 Different timeout, retry, and routing policies per agent. Over-engineering until there are enough agents to warrant differentiation.
 

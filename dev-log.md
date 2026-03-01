@@ -1410,3 +1410,27 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Documentation: README and setup-runbook updated with explicit webhook ID extraction instructions and `allowFrom`/`users` requirements. Troubleshooting checklist updated.
 - Risk introduced: None. Config-only change.
 - Rollback note: Restore old `allowFrom`/`users` values in `openclaw.json`. Restart gateway.
+
+- Date/Time: 2026-03-01
+- Author: Claude Code (Opus 4.6)
+- Change: Agent self-identity via `message_sending` hook — implemented but disabled (experimental).
+- Why: Agents' own messages in their channels appear as generic "openclaw APP". After webhooks migration, relay dispatches show correct source identity in other agents' channels, making the contrast more noticeable. Option A (OpenClaw native `responseWebhook`) was tested and confirmed unavailable in 2026.2.26. Option B uses the `message_sending` plugin hook to intercept outgoing messages, post via webhook with the agent's identity, and cancel native bot delivery.
+- What was built:
+  - `transport-discord.ts`: Exported `postDiscordMessage` and `DISCORD_MAX_CONTENT` for use by the hook handler.
+  - `openclaw-plugin.ts`: Added `message_sending` hook handler gated behind `CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED=1` (default off). Parses `CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON` (channel ID → agent ID reverse map) and `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON` at plugin level. Handles `channel:SNOWFLAKE` format for `event.to`. Webhook post wrapped in try/catch to prevent errors from swallowing the cancel return value.
+  - `clawsuite-relay.conf`: Added `CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON` with all 13 channel→agent mappings.
+  - Tests: 6 new tests (hook registration gating, webhook post + cancel, non-Discord passthrough, unknown channel passthrough, chunking, opt-in enforcement). 36/36 pass.
+- What was discovered (investigation notes):
+  - `event.to` uses `channel:SNOWFLAKE` format, not raw snowflake. Discovered via diagnostic logging.
+  - **Plugin hook return values are NOT reliably fed back to the delivery pipeline.** Confirmed via diagnostic: returning `{ content: "[modified text]", cancel: true }` — native message showed original content, not modified. The `message_sending` hook fires via the plugin dispatch system, but the delivery code's `hookRunner.runMessageSending()` appears to operate on a separate context.
+  - Minimal cancel-only handler (no webhook post) DID suppress the CEO's outgoing message. But adding a webhook post back caused cancel to stop working — the native message appeared alongside the webhook message. Even with try/catch isolation around the webhook post, the same behavior occurred. Root cause not fully determined.
+  - `message_sent` hook does NOT provide `messageId` to plugin hooks (only to internal hooks), ruling out a delete-after-send fallback strategy.
+  - The hook only fires for the CEO process (outgoing messages to #general), NOT for subagent responses in their own channels. Subagent completion announces appear to bypass the plugin hook.
+- Current state: Hook infrastructure in place but disabled. System is clean — no duplicates, no side effects. Enable with `CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED=1` for further experimentation.
+- Approaches to revisit:
+  1. **Upstream fix (preferred):** OpenClaw issue #6821 (`responseWebhook`) would natively support per-agent webhook identity. Monitor for release.
+  2. **Internal hooks:** OpenClaw internal hooks (not plugin hooks) may have proper delivery control. Would require registering as a hook script rather than plugin `api.on()`.
+  3. **Race condition investigation:** The inconsistency between minimal cancel (works) and full cancel (doesn't) suggests a timing or context issue worth investigating with more targeted logging.
+  4. **Bot message deletion:** If the Discord bot token is accessible, post-hoc deletion of the native bot message (fetch recent → delete by author) could work even without `messageId` in the hook. Adds ~1-3s flash of the bot message.
+- Risk introduced: None with feature disabled. Infrastructure changes (exports, config) are inert.
+- Rollback note: Remove `CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON` from `clawsuite-relay.conf`. Revert exports in `transport-discord.ts`. Remove hook handler and config parsing from `openclaw-plugin.ts`. Remove tests. Rebuild + restart.

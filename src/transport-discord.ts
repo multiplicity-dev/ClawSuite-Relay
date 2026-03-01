@@ -7,7 +7,7 @@ interface DiscordRelayConfig {
   sleepFn?: (ms: number) => Promise<void>;
 }
 
-const DISCORD_MAX_CONTENT = 2000;
+export const DISCORD_MAX_CONTENT = 2000;
 const DISCORD_WEBHOOK_URL_RE = /^https:\/\/(?:canary\.|ptb\.)?discord\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9._-]+$/;
 
 // Transient retry for the single write boundary to Discord.
@@ -33,7 +33,7 @@ function parseRetryAfterMs(headerValue: string | null): number {
   return Math.min(MAX_RETRY_AFTER_MS, Math.max(MIN_RETRY_AFTER_MS, ms));
 }
 
-async function postDiscordMessage(
+export async function postDiscordMessage(
   webhookUrl: string,
   payload: Record<string, unknown>,
   sleepFn: (ms: number) => Promise<void> = sleep
