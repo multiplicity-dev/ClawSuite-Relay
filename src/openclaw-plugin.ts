@@ -24,15 +24,15 @@ export default function register(api: PluginApi) {
     relayTransport = undefined;
   }
 
-  // Build channel map for agent ID → channel ID lookups (used by llm_output hook).
-  let channelMap: Record<string, string> = {};
+  // Build webhook map for target-agent membership checks (used by llm_output hook).
+  let webhookMap: Record<string, string> = {};
   try {
-    const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
-    if (rawChannels) {
-      channelMap = JSON.parse(rawChannels) as Record<string, string>;
+    const rawWebhooks = process.env.CLAWSUITE_RELAY_WEBHOOK_MAP_JSON;
+    if (rawWebhooks) {
+      webhookMap = JSON.parse(rawWebhooks) as Record<string, string>;
     }
   } catch {
-    // channel map parsing handled by transportFromEnv; no-op here
+    // webhook map parsing handled by transportFromEnv; no-op here
   }
 
   // Register relay_dispatch as a tool factory — the factory receives
@@ -66,7 +66,7 @@ export default function register(api: PluginApi) {
     if (!relayEnabled) return;
     const targetAgentId = asString(ctx?.agentId);
     if (!targetAgentId) return;
-    if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
+    if (!Object.prototype.hasOwnProperty.call(webhookMap, targetAgentId)) return;
 
     const armed = await getArmedDispatch(targetAgentId);
     if (!armed) return;

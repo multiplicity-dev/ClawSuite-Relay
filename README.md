@@ -24,23 +24,21 @@ npm run build
 
 Current implementation status: Phase 2 complete, all-directional relay wired. All 13 agents can dispatch to any other via `relay_dispatch`. Naive subject propensity test passed — agents adopt relay from TOOLS.md policy on first contact without priming. Phase 3 (enforcement) likely unnecessary. See `implementation-plan.md` and `feature-backlog.md` for details.
 
-## Prerequisite: Create a second Discord bot
+## Prerequisite: Create channel webhooks
 
-ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages (self-message filter), so a second bot identity is needed for relay messages to be visible to subagent sessions.
+ClawSuite-Relay dispatch posting uses Discord incoming webhooks mapped per target channel.
 
-1. Go to https://discord.com/developers/applications → "New Application"
-2. Name it (e.g., "ClawSuite-Relay")
-3. Go to Bot tab → "Reset Token" → copy the token
-4. Go to OAuth2 → URL Generator → select `bot` scope → set permissions to `2048` (Send Messages)
-5. Use the generated invite URL to add the bot to your Discord server
-6. Decode the bot's user ID for config: `echo -n "<token_prefix_before_first_dot>" | base64 -d`
+1. Open each target Discord channel settings.
+2. Integrations → Webhooks → create webhook.
+3. Copy webhook URLs for env config.
+4. Optionally set default name/avatar in webhook UI.
 
-The relay bot appears with its own name and visual styling in Discord, which provides clear visual distinction between orchestrator relay dispatches and direct subagent messages.
+Per-message source identity can be overridden in code using `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON` (`username` and `avatarUrl`).
 
 ## Discord transport wiring (env config)
 Configure via environment variables (typically in a systemd drop-in):
-- `CLAWSUITE_RELAY_BOT_TOKEN` — the **relay bot's** token (not the main OpenClaw bot token)
-- `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
+- `CLAWSUITE_RELAY_WEBHOOK_MAP_JSON` — JSON map of `targetAgentId -> Discord webhook URL`
+- `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON` — optional JSON map of `sourceAgentId -> { username, avatarUrl }` for per-origin identity
 - `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
 - `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
 - `CLAWSUITE_RELAY_ARM_TTL_MS` — armed dispatch TTL in milliseconds (default `1800000` / 30 minutes)
@@ -49,8 +47,8 @@ Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/claw
 ```ini
 [Service]
 Environment=CLAWSUITE_RELAY_ENABLED=1
-Environment=CLAWSUITE_RELAY_BOT_TOKEN=<relay_bot_token>
-Environment=CLAWSUITE_RELAY_CHANNEL_MAP_JSON="{\"systems-eng\":\"1474868861525557308\"}"
+Environment=CLAWSUITE_RELAY_WEBHOOK_MAP_JSON="{\"systems-eng\":\"https://discord.com/api/webhooks/<id>/<token>\"}"
+Environment=CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON="{\"ceo\":{\"username\":\"CEO\",\"avatarUrl\":\"https://example.com/ceo.png\"}}"
 Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
 ```
 
@@ -77,7 +75,7 @@ openclaw gateway restart
 
 ## OpenClaw config requirements (`openclaw.json`)
 
-The plugin registers a `relay_dispatch` tool, but OpenClaw requires explicit agent-level configuration for tool visibility and bot message handling.
+The plugin registers a `relay_dispatch` tool, but OpenClaw requires explicit agent-level configuration for tool visibility and webhook/bot message handling.
 
 ### Tool visibility
 Each agent that should call `relay_dispatch` needs it in `tools.alsoAllow`:
@@ -90,24 +88,29 @@ Each agent that should call `relay_dispatch` needs it in `tools.alsoAllow`:
 }
 ```
 
-### Bot message handling
-The relay bot uses a separate Discord bot token. By default, OpenClaw ignores bot messages (`allowBots: false`). To allow the relay bot's messages to reach subagent sessions:
+### Webhook message handling
+Relay dispatches are posted via Discord webhooks. OpenClaw typically ignores bot/webhook messages by default (`allowBots: false`). To allow relay dispatch messages to reach subagent sessions:
+
+1. Set `allowBots: true` in the discord channel config.
+2. Add each webhook's author ID to both `allowFrom` and guild `users`. The author ID is the first path segment of the webhook URL (e.g., `https://discord.com/api/webhooks/1477412870894518356/...` → ID is `1477412870894518356`).
+
 ```json
 {
   "channels": {
     "discord": {
       "allowBots": true,
-      "allowFrom": ["<human_user_id>", "<relay_bot_user_id>"],
+      "allowFrom": ["<human_user_id>", "<webhook_id_1>", "<webhook_id_2>", "..."],
       "guilds": {
         "<guild_id>": {
-          "users": ["<human_user_id>", "<relay_bot_user_id>"]
+          "users": ["<human_user_id>", "<webhook_id_1>", "<webhook_id_2>", "..."]
         }
       }
     }
   }
 }
 ```
-The relay bot's user ID can be decoded from its token: `echo -n "<token_prefix_before_first_dot>" | base64 -d`.
+
+Without the webhook IDs in both lists, OpenClaw silently drops webhook messages — dispatches appear in Discord but agents never process them.
 
 ## Dispatch ID correlation path
 The `dispatchId` is the correlation key that links a dispatch to its result. It does not appear in Discord channel messages — correlation is handled internally:

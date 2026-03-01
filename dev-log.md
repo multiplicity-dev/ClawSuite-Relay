@@ -1384,3 +1384,29 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   - Historical docs tagged with supersession note (`relay-bot-plan.md`, `test-validation-plan.md`).
 - Risk introduced: Low. Behavior change is intentional (no mentions). Retry behavior remains bounded by existing attempt budget.
 - Rollback note: Revert latest local commit touching mention removal and retry hardening. If needed, reintroduce mention env/schema in transport and docs.
+
+- Date/Time: 2026-02-28
+- Author: Codex (GPT-5)
+- Change: Webhook transport migration — bot token → per-channel Discord webhooks with source identity profiles.
+- Why: Webhooks allow per-message username and avatar overrides. Relay dispatches now appear with the source agent's identity (e.g., "CEO" with avatar) instead of a generic bot name. Also eliminates the need for a separate bot application.
+- Evidence:
+  - `transport-discord.ts`: Replaced `botToken`/`channelsByAgent` with `webhooksByAgent`/`sourceProfilesByAgent`. Webhook URL validation regex. Payload includes `username`, `avatar_url`, `allowed_mentions: { parse: [] }`. `?wait=true` query param for Discord to return the message object.
+  - `clawsuite-relay.conf`: `CLAWSUITE_RELAY_WEBHOOK_MAP_JSON` (13 webhooks), `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON` (13 agent profiles with display names and avatar URLs). Bot token and channel/mention maps removed.
+  - `openclaw-plugin.ts`: `channelMap` → `webhookMap` for agent membership checks.
+  - `relay-dispatch-tool.ts`: Description updated ("webhook mapping" instead of "channel mapping").
+  - Tests: All transport tests updated for webhook constructor API. Source profile assertions added.
+  - Docs: README, setup-runbook, feature-backlog updated for webhook flow.
+- Risk introduced: Low. Webhook URLs are secrets (contain token) — stored in systemd env, not committed. `allowed_mentions: { parse: [] }` prevents accidental @everyone/@here.
+- Rollback note: Restore bot token config, revert transport to channel-based API.
+
+- Date/Time: 2026-03-01
+- Author: Claude Code (Opus 4.6)
+- Change: Fixed webhook author IDs missing from OpenClaw `allowFrom`/`users` — dispatches were silently dropped.
+- Why: After migrating from bot token to webhooks, the old relay bot user ID (`1476809589591773295`) was still in `allowFrom`/`users`. Webhook messages have a different author identity — the webhook's own ID (first path segment of webhook URL). OpenClaw silently drops messages from unknown authors.
+- Evidence:
+  - Symptom: CEO dispatched to doctor. Message appeared in Discord channel with correct webhook identity (username, avatar). Doctor never responded. No errors in journal.
+  - Root cause: `openclaw.json` `allowFrom` and guild `users` only contained the human user ID and the old bot user ID. Webhook author IDs were not present.
+  - Fix: Replaced old bot ID with all 13 webhook IDs in both `allowFrom` and `users`. Gateway restarted. Subsequent dispatch succeeded end-to-end.
+  - Documentation: README and setup-runbook updated with explicit webhook ID extraction instructions and `allowFrom`/`users` requirements. Troubleshooting checklist updated.
+- Risk introduced: None. Config-only change.
+- Rollback note: Restore old `allowFrom`/`users` values in `openclaw.json`. Restart gateway.

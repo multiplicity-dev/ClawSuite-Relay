@@ -9,7 +9,7 @@ process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
 process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
 process.env.CLAWSUITE_RELAY_ENABLED = "1";
 process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID = "1474868861525557308";
-process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999999"}';
+process.env.CLAWSUITE_RELAY_WEBHOOK_MAP_JSON = '{"systems-eng":"https://discord.com/api/webhooks/9999999999999999999/test-token"}';
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
@@ -102,4 +102,3 @@ test("relay_dispatch tool factory produces working tool", async () => {
   assert.equal(result.details.status, "accepted");
   assert.ok(result.details.dispatchId);
 });
-

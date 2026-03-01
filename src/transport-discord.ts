@@ -2,19 +2,13 @@ import type { RelayPostRequest, RelayPostResult, RelayTransport } from "./transp
 import { type RelayEnvelope, serializeForDiscord } from "./envelope.js";
 
 interface DiscordRelayConfig {
-  botToken: string;
-  channelsByAgent: Record<string, string>;
+  webhooksByAgent: Record<string, string>;
+  sourceProfilesByAgent?: Record<string, { username?: string; avatarUrl?: string }>;
   sleepFn?: (ms: number) => Promise<void>;
 }
 
 const DISCORD_MAX_CONTENT = 2000;
-const SNOWFLAKE_RE = /^\d{17,20}$/;
-
-function validateSnowflake(value: string | undefined, label: string) {
-  if (!value || !SNOWFLAKE_RE.test(value)) {
-    throw new Error(`Invalid ${label}`);
-  }
-}
+const DISCORD_WEBHOOK_URL_RE = /^https:\/\/(?:canary\.|ptb\.)?discord\.com\/api\/webhooks\/\d{17,20}\/[A-Za-z0-9._-]+$/;
 
 // Transient retry for the single write boundary to Discord.
 // 429: respect Retry-After header. 500/502/503: fixed 2s backoff.
@@ -40,21 +34,17 @@ function parseRetryAfterMs(headerValue: string | null): number {
 }
 
 async function postDiscordMessage(
-  botToken: string,
-  channelId: string,
-  content: string,
+  webhookUrl: string,
+  payload: Record<string, unknown>,
   sleepFn: (ms: number) => Promise<void> = sleep
 ): Promise<{ id: string }> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response: Response;
     try {
-      response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      response = await fetch(`${webhookUrl}?wait=true`, {
         method: "POST",
-        headers: {
-          Authorization: `Bot ${botToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ content })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
     } catch (err) {
       if (attempt === MAX_ATTEMPTS) {
@@ -127,15 +117,31 @@ export class DiscordRelayTransport implements RelayTransport {
   constructor(private readonly cfg: DiscordRelayConfig) {}
 
   async postToChannel(request: RelayPostRequest): Promise<RelayPostResult> {
-    const channelId = this.cfg.channelsByAgent[request.targetAgentId];
-    if (!channelId) throw new Error(`No channel mapping for ${request.targetAgentId}`);
-    validateSnowflake(channelId, `Discord channel id for ${request.targetAgentId}`);
+    const webhookUrl = this.cfg.webhooksByAgent[request.targetAgentId];
+    if (!webhookUrl) throw new Error(`No webhook mapping for ${request.targetAgentId}`);
+    if (!DISCORD_WEBHOOK_URL_RE.test(webhookUrl)) {
+      throw new Error(`Invalid Discord webhook URL for ${request.targetAgentId}`);
+    }
+
+    const sourceAgentId = request.sourceAgentId ?? "relay";
+    const sourceProfile = this.cfg.sourceProfilesByAgent?.[sourceAgentId];
+    const username = sourceProfile?.username || sourceAgentId;
+    const avatarUrl = sourceProfile?.avatarUrl;
+    const payloadBase: Record<string, unknown> = {
+      username,
+      allowed_mentions: { parse: [] as string[] }
+    };
+    if (avatarUrl) payloadBase.avatar_url = avatarUrl;
 
     const content = buildRelayContent(request, { sourceAgentId: request.sourceAgentId });
 
     // Single message if it fits
     if (content.length <= DISCORD_MAX_CONTENT) {
-      const json = await postDiscordMessage(this.cfg.botToken, channelId, content, this.cfg.sleepFn);
+      const json = await postDiscordMessage(
+        webhookUrl,
+        { ...payloadBase, content },
+        this.cfg.sleepFn
+      );
       return { messageId: json.id };
     }
 
@@ -155,7 +161,11 @@ export class DiscordRelayTransport implements RelayTransport {
       let msg = taskChunks[i];
       if (i === taskChunks.length - 1) msg = msg + footer;
 
-      const json = await postDiscordMessage(this.cfg.botToken, channelId, msg, this.cfg.sleepFn);
+      const json = await postDiscordMessage(
+        webhookUrl,
+        { ...payloadBase, content: msg },
+        this.cfg.sleepFn
+      );
       lastMessageId = json.id;
     }
 
@@ -172,15 +182,20 @@ function parseJsonEnv<T>(raw: string, envName: string): T {
 }
 
 export function transportFromEnv(): DiscordRelayTransport {
-  const botToken = process.env.CLAWSUITE_RELAY_BOT_TOKEN;
-  const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
+  const rawWebhooks = process.env.CLAWSUITE_RELAY_WEBHOOK_MAP_JSON;
+  const rawSourceProfiles = process.env.CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON;
 
-  if (!botToken) throw new Error("Missing CLAWSUITE_RELAY_BOT_TOKEN");
-  if (!rawChannels) throw new Error("Missing CLAWSUITE_RELAY_CHANNEL_MAP_JSON");
+  if (!rawWebhooks) throw new Error("Missing CLAWSUITE_RELAY_WEBHOOK_MAP_JSON");
 
-  const channelsByAgent = parseJsonEnv<Record<string, string>>(
-    rawChannels,
-    "CLAWSUITE_RELAY_CHANNEL_MAP_JSON"
+  const webhooksByAgent = parseJsonEnv<Record<string, string>>(
+    rawWebhooks,
+    "CLAWSUITE_RELAY_WEBHOOK_MAP_JSON"
   );
-  return new DiscordRelayTransport({ botToken, channelsByAgent });
+  const sourceProfilesByAgent = rawSourceProfiles
+    ? parseJsonEnv<Record<string, { username?: string; avatarUrl?: string }>>(
+      rawSourceProfiles,
+      "CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON"
+    )
+    : undefined;
+  return new DiscordRelayTransport({ webhooksByAgent, sourceProfilesByAgent });
 }

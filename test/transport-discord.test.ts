@@ -43,8 +43,12 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
   const originalFetch = globalThis.fetch;
   let callCount = 0;
   const sleepCalls: number[] = [];
+  const urls: string[] = [];
+  const bodies: Array<Record<string, unknown>> = [];
 
-  globalThis.fetch = (async () => {
+  globalThis.fetch = (async (input, init) => {
+    urls.push(String(input));
+    bodies.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
     callCount++;
     if (callCount === 1) {
       return { ok: false, status: 502, text: async () => "Bad Gateway", headers: new Headers() };
@@ -54,8 +58,8 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
 
   try {
     const transport = new DiscordRelayTransport({
-      botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
+      sourceProfilesByAgent: { ceo: { username: "CEO", avatarUrl: "https://example.com/ceo.png" } },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -68,6 +72,20 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
     assert.equal(result.messageId, "msg-123");
     assert.equal(callCount, 2, "should have retried once after 502");
     assert.deepEqual(sleepCalls, [2000], "should use 2s server-error backoff");
+    assert.equal(urls[0], "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token?wait=true");
+    assert.equal(bodies[0]?.username, "relay", "source fallback should be relay");
+    assert.deepEqual(bodies[0]?.allowed_mentions, { parse: [] });
+    assert.equal(bodies[0]?.avatar_url, undefined);
+
+    const profiled = await transport.postToChannel({
+      dispatchId: "d-retry-1b",
+      targetAgentId: "systems-eng",
+      task: "profiled task",
+      sourceAgentId: "ceo"
+    });
+    assert.equal(profiled.messageId, "msg-123");
+    assert.equal(bodies[2]?.username, "CEO");
+    assert.equal(bodies[2]?.avatar_url, "https://example.com/ceo.png");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -85,8 +103,7 @@ test("postToChannel does not retry on non-transient 403", async () => {
 
   try {
     const transport = new DiscordRelayTransport({
-      botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -117,8 +134,7 @@ test("postToChannel retries on thrown network error then succeeds", async () => 
 
   try {
     const transport = new DiscordRelayTransport({
-      botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -156,8 +172,7 @@ test("postToChannel uses fallback Retry-After when header is invalid", async () 
 
   try {
     const transport = new DiscordRelayTransport({
-      botToken: "fake-token",
-      channelsByAgent: { "systems-eng": "12345678901234567890" },
+      webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -173,4 +188,14 @@ test("postToChannel uses fallback Retry-After when header is invalid", async () 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("postToChannel rejects invalid webhook URL", async () => {
+  const transport = new DiscordRelayTransport({
+    webhooksByAgent: { "systems-eng": "not-a-webhook-url" }
+  });
+  await assert.rejects(
+    () => transport.postToChannel({ dispatchId: "d-invalid-webhook", targetAgentId: "systems-eng", task: "test" }),
+    /Invalid Discord webhook URL/
+  );
 });

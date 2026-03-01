@@ -5,7 +5,7 @@ import type { RelayTransport } from "./transport.js";
 const parameters = Type.Object({
   targetAgentId: Type.String({
     description:
-      "The relay-bound agent to dispatch to (must have a channel mapping configured)."
+      "The relay-bound agent to dispatch to (must have a webhook mapping configured)."
   }),
   task: Type.String({
     description:
