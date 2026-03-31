@@ -183,7 +183,25 @@ journalctl --user -u openclaw-gateway.service --since "10 min ago" | grep "llm_o
 
 ### Idempotent replay vs new dispatch
 
-If you dispatch with the same `requestId` and the prior dispatch is in a replayable state (POSTED_TO_CHANNEL, SUBAGENT_RESPONDED, COMPLETED), you'll get the existing dispatchId back. If the prior dispatch FAILED, a new dispatch is created.
+Current behavior is stricter than the original v1 notes:
+
+- If the same `requestId` is reused while the earlier dispatch is still `POSTED_TO_CHANNEL` or `SUBAGENT_RESPONDED`, relay returns `DISPATCH_IN_FLIGHT`.
+- `DISPATCH_IN_FLIGHT` means:
+  - no new message was posted
+  - the prior dispatch is still active
+  - the caller should wait or retry with a fresh unique `requestId`
+- If the prior dispatch is `COMPLETED`, idempotent replay still returns the existing `dispatchId`.
+- If the prior non-completed dispatch is stale enough to exceed `CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`, relay expires it, marks it `FAILED`, and creates a fresh dispatch.
+- If the prior dispatch is already `FAILED`, a new dispatch is created.
+
+### Dispatch lands with generic relay identity instead of source agent branding
+
+This should no longer happen silently. Current production behavior requires:
+
+- a non-empty `orchestratorAgentId` at relay-dispatch time
+- a matching entry in `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON`
+
+If either is missing, relay now fails closed instead of posting as generic `relay`.
 
 ---
 
@@ -202,4 +220,6 @@ If you dispatch with the same `requestId` and the prior dispatch is in a replaya
 | pr-manager | #pr | 1474868920019062814 |
 | marketing-strat | #marketing | 1474868938721595573 |
 | learning-architect | #learning | 1474868986926596178 |
+| translator | #translation | 1477870590605131858 |
+| coder | #software | 1477871335152816240 |
 | pa | #assistant | 1474869013824933941 |
