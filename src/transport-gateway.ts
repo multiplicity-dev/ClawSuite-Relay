@@ -62,6 +62,12 @@ export function buildRelayTriggerMessage(request: ForwardRequest, orchestratorAg
  * Uses `gateway call` (raw RPC) instead of `openclaw agent` because
  * `agent --session-id` expects a UUID, not a session key. The raw RPC
  * call passes sessionKey in params directly, matching the native announce path.
+ *
+ * Important: relay delivery should succeed as soon as the gateway accepts the
+ * injected message. Waiting for a full final assistant answer (`--expect-final`)
+ * turns this transport into a CLO run-timeout proxy and causes false failures
+ * when the orchestrator is yielded or simply needs longer than the CLI timeout
+ * to synthesize its user-facing response.
  */
 export class GatewayForwardTransport implements ForwardTransport {
   constructor(private readonly cfg: GatewayForwardConfig) {}
@@ -91,7 +97,6 @@ export class GatewayForwardTransport implements ForwardTransport {
       const args = [
         "gateway", "call", "agent",
         "--params", params,
-        "--expect-final",
         "--timeout", String(timeoutMs),
         "--json"
       ];

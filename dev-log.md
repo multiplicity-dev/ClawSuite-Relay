@@ -1434,3 +1434,113 @@ Dave and Claude Code regrouped to find the working state and strip to minimum.
   4. **Bot message deletion:** If the Discord bot token is accessible, post-hoc deletion of the native bot message (fetch recent → delete by author) could work even without `messageId` in the hook. Adds ~1-3s flash of the bot message.
 - Risk introduced: None with feature disabled. Infrastructure changes (exports, config) are inert.
 - Rollback note: Remove `CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON` from `clawsuite-relay.conf`. Revert exports in `transport-discord.ts`. Remove hook handler and config parsing from `openclaw-plugin.ts`. Remove tests. Rebuild + restart.
+
+- Date/Time: 2026-03-02
+- Author: Codex (GPT-5)
+- Change: Hard-disabled the experimental self-identity repost path to eliminate webhook self-echo loops.
+- Why: Even when intended as opt-in, the `message_sending` self-identity repost path can create channel-local feedback loops (agent sees webhook mirror as new bot input and responds again). Stable relay behavior requires this path to be unavailable until OpenClaw supports native response webhooks.
+- Evidence:
+  - `openclaw-plugin.ts`: removed self-identity `message_sending` handler and related config parsing; added warning log if `CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED=1` is set (`ignored`).
+  - `test/openclaw-plugin.test.ts`: removed self-identity repost tests; added assertion that `message_sending` is not registered even with legacy self-identity env flags.
+  - Validation: `npm test` (4/4 passing), `npm run typecheck` clean.
+- Risk introduced: Low. This removes an experimental path only; core relay (`relay_dispatch` + `llm_output` capture + gateway injection) is unchanged.
+- Rollback note: Reintroduce the removed handler/tests from 2026-03-01 entry only if intentionally resuming self-identity experiments in an isolated environment.
+
+- Date/Time: 2026-03-02
+- Author: Codex (GPT-5)
+- Change: Onboarded two new relay-bound agents: `translator` (`#translation`) and `coder` (`#software`).
+- Why: Expand the specialist roster while keeping all-directional relay behavior consistent across OpenClaw + ClawSuite-Relay configuration surfaces.
+- Evidence:
+  - `~/.openclaw/openclaw.json`: added both agents (`openai-codex/gpt-5.3-codex`), Discord bindings, webhook author IDs in `allowFrom`/guild `users`, and channel allowlist entries.
+  - `~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`: added webhook map entries, source profile entries, and channel-agent map entries for both channels.
+  - New workspaces created: `workspace-translation`, `workspace-software` with `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `STATUS.md`, `good-outputs.md`, `bad-outputs.md`, `published/`, and `memory/`.
+  - Shared `TOOLS.md` channel/session tables updated across all workspaces to include translator/coder.
+  - Meta docs updated (`README.md`, `setup-runbook.md`, OpenClaw internal references) for 15-agent state.
+  - Gateway restarted successfully after config changes.
+- Risk introduced: Low-medium. Config expansion is straightforward, but new webhook tokens should be validated in live dispatch because direct unauthenticated webhook probes returned `401` in this session.
+- Rollback note: Remove `translator`/`coder` entries from `openclaw.json` and relay drop-in maps, delete the two workspace folders, then restart the gateway.
+- Date/Time: 2026-03-16
+- Author: Codex (GPT-5)
+- Change: Hardened relay return-path failure handling after CLO↔translator incidents.
+- Why: Two distinct live failures were observed in legal translation work.
+  1. **False return-hop failure:** relay captured translator output and injected it back to CLO, but `GatewayForwardTransport` treated the hop as failed because it waited for a full final CLO answer within 60s (`--expect-final`). Logs showed the translator result was actually processed by CLO later, so this was a false negative.
+  2. **Stale-dispatch loop risk:** after a forward error, the plugin left the dispatch effectively armed/replayable. This creates the failure mode where an old translator dispatch can stay "live" and CLO can keep re-triggering or re-accepting the same request path after an error.
+- Evidence:
+  - OpenClaw workspace incident log (2026-03-16 11:20-11:33 CET) showed:
+    - `dispatch.posted` for translator at `11:20:50 CET`
+    - translator output captured at `11:21:22 CET`
+    - `gateway.forward.failed` at `11:22:23 CET` with `gateway timeout after 60000ms`
+    - CLO still processed the returned Segment 01 review at `11:23:07 CET`
+  - Code inspection:
+    - `src/transport-gateway.ts` used `openclaw gateway call agent --expect-final --timeout 60000 --json`
+    - `src/openclaw-plugin.ts` catch path on `llm_output` only logged the error; it did not mark the dispatch failed or clear the armed record
+- Fix applied:
+  - `src/transport-gateway.ts`
+    - removed `--expect-final`
+    - relay delivery now succeeds once the gateway accepts the injected message
+  - `src/openclaw-plugin.ts`
+    - when subagent output is captured, dispatch now moves `POSTED_TO_CHANNEL` → `SUBAGENT_RESPONDED`
+    - successful gateway delivery moves `SUBAGENT_RESPONDED` → `COMPLETED` and records `forwardedMessageId`
+    - missing orchestrator session key or gateway-forward exception now moves `SUBAGENT_RESPONDED` → `FAILED`, records `lastError`, and disarms the target agent
+    - this is the circuit-breaker for the stale translator re-dispatch loop
+  - `src/types.ts`
+    - added `lastError?: string` to `DispatchRecord`
+  - `test/openclaw-plugin.test.ts`
+    - regression case now asserts that a gateway-forward failure leaves the dispatch `FAILED` and the armed record cleared
+- Validation:
+  - `npm run build` ✅
+  - `npm test` ✅ (`4/4` passing)
+- Risk introduced: Low. State machine is stricter, but only on already-failed return hops. The change makes failures visible and terminal instead of silently leaving stale armed state behind.
+- Rollback note: Revert the 2026-03-16 changes in `src/transport-gateway.ts`, `src/openclaw-plugin.ts`, `src/types.ts`, and `test/openclaw-plugin.test.ts`, then rebuild and restart the gateway.
+
+- Date/Time: 2026-03-16
+- Author: Codex (GPT-5)
+- Change: Added preventive guards for immediate duplicate dispatches and generic relay-branded posts.
+- Why: After the return-hop fix, a second issue remained: the system could still behave confusingly at dispatch start.
+  1. **Immediate duplicate loop risk:** if CLO reused the same `requestId` turn-to-turn while the earlier dispatch was still live, relay returned `accepted` via idempotency instead of making it clear that nothing new had been posted.
+  2. **Generic relay branding:** if dispatch context reached Discord posting without a valid source agent/profile, the message could still land with generic `relay` identity, which is visually misleading in the target channel.
+- Evidence:
+  - Live logs showed `dispatch.idempotent_hit` against an old `seg-03-review` record still in `POSTED_TO_CHANNEL`, which matches the observed “accepted but didn’t actually re-send” symptom.
+  - Visual symptom reported by operator: some translator-channel posts appeared without CLO username/avatar, while correctly formed relay posts carried CLO branding.
+- Fix applied:
+  - `src/index.ts`
+    - relay now requires `orchestratorAgentId`; missing identity fails loudly with `RELAY_UNAVAILABLE`
+    - duplicate `requestId` against `POSTED_TO_CHANNEL` / `SUBAGENT_RESPONDED` now returns `DISPATCH_IN_FLIGHT` instead of `accepted`
+    - replayable non-completed dispatches now expire after bounded TTL (`CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`, default 6h)
+    - dispatch records now persist `sourceAgentId`
+  - `src/transport-discord.ts`
+    - Discord posting now requires a non-empty `sourceAgentId`
+    - source profile lookup is mandatory; missing profile throws instead of silently falling back to generic `relay`
+  - `src/types.ts`
+    - added `DISPATCH_IN_FLIGHT`
+    - added `sourceAgentId?: string` to `DispatchRecord`
+  - Tests:
+    - `test/relay-dispatch.test.ts`: in-flight duplicate rejection, stale replayable expiry, missing orchestrator identity
+    - `test/transport-discord.test.ts`: missing source profile rejection
+- Validation:
+  - `npm run build` ✅
+  - `npm test` ✅ (`4/4` passing)
+- Risk introduced: Low. This is a fail-closed change. Ambiguous dispatch starts are now explicit failures instead of misleading partial success.
+- Rollback note: Revert the second 2026-03-16 hardening pass in `src/index.ts`, `src/transport-discord.ts`, `src/types.ts`, `test/relay-dispatch.test.ts`, and `test/transport-discord.test.ts`, then rebuild and restart the gateway.
+
+- Date/Time: 2026-03-17
+- Author: Codex (GPT-5)
+- Change: Clarified agent-facing accepted-vs-replay wording and fixed test isolation for armed-dispatch state.
+- Why:
+  1. Operators were still seeing the ambiguous case where CLO said "Relay dispatch accepted" but no new translator post appeared, because a completed idempotent replay reused an old dispatch while still reading like a fresh post.
+  2. During the wording patch, the full suite exposed a real harness bug: tests isolated `CLAWSUITE_RELAY_DISPATCH_DIR` but not `CLAWSUITE_RELAY_ARMED_DIR`, so plugin tests could touch the real armed-dispatch path and fail nondeterministically.
+- Fix applied:
+  - `src/relay-dispatch-tool.ts`
+    - accepted tool text now distinguishes:
+      - fresh dispatch: task posted to target channel
+      - completed idempotent replay: no new message posted; prior completed dispatch reused
+  - `test/relay-dispatch.test.ts`
+    - added regression coverage asserting the tool text explicitly says `idempotent replay` and `No new message was posted`
+  - `test/openclaw-plugin.test.ts`
+  - `test/relay-dispatch.test.ts`
+    - both now isolate `CLAWSUITE_RELAY_ARMED_DIR` into temp dirs alongside `CLAWSUITE_RELAY_DISPATCH_DIR`
+- Validation:
+  - `npm run build` ✅
+  - `npm test` ✅ (`4/4` passing)
+- Operational note:
+  - This removes the last major agent-facing ambiguity in the "accepted but I didn’t see a new translator post" case. A reused completed dispatch is now described as reuse, not a fresh delivery.

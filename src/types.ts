@@ -6,7 +6,8 @@ export const RELAY_CODES = {
   // Reserved for future phases (Phase 4: reliability & hardening):
   MENTION_POLICY_BLOCKED: "MENTION_POLICY_BLOCKED",
   RATE_LIMITED: "RATE_LIMITED",
-  SUBAGENT_TIMEOUT: "SUBAGENT_TIMEOUT"
+  SUBAGENT_TIMEOUT: "SUBAGENT_TIMEOUT",
+  DISPATCH_IN_FLIGHT: "DISPATCH_IN_FLIGHT"
 } as const;
 
 export type RelayCode = (typeof RELAY_CODES)[keyof typeof RELAY_CODES];
@@ -43,11 +44,13 @@ export interface DispatchRecord {
   dispatchId: string;
   requestId?: string;
   targetAgentId: string;
+  sourceAgentId?: string;
   task: string;
   state: DispatchState;
   postedMessageId?: string;
   subagentResponseMessageId?: string;
   forwardedMessageId?: string;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 }

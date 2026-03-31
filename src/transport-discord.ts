@@ -123,9 +123,15 @@ export class DiscordRelayTransport implements RelayTransport {
       throw new Error(`Invalid Discord webhook URL for ${request.targetAgentId}`);
     }
 
-    const sourceAgentId = request.sourceAgentId ?? "relay";
+    const sourceAgentId = request.sourceAgentId?.trim();
+    if (!sourceAgentId) {
+      throw new Error(`Missing source agent identity for ${request.targetAgentId}`);
+    }
     const sourceProfile = this.cfg.sourceProfilesByAgent?.[sourceAgentId];
-    const username = sourceProfile?.username || sourceAgentId;
+    if (!sourceProfile?.username) {
+      throw new Error(`Missing source profile for ${sourceAgentId}`);
+    }
+    const username = sourceProfile.username;
     const avatarUrl = sourceProfile?.avatarUrl;
     const payloadBase: Record<string, unknown> = {
       username,
@@ -146,7 +152,7 @@ export class DiscordRelayTransport implements RelayTransport {
     }
 
     // Multi-message: split the task content and append envelope footer to last chunk.
-    const footer = `\n\nfrom ${request.sourceAgentId ?? "relay"}`;
+    const footer = `\n\nfrom ${sourceAgentId}`;
 
     // Reserve space for footer in last chunk.
     const firstMaxLen = DISCORD_MAX_CONTENT;

@@ -14,7 +14,7 @@ const parameters = Type.Object({
   requestId: Type.Optional(
     Type.String({
       description:
-        "Optional idempotency key. Duplicate requestIds return the existing dispatch."
+        "Optional idempotency key. Reusing a live requestId is blocked with DISPATCH_IN_FLIGHT; use a fresh unique value for each intended new dispatch."
     })
   )
 });
@@ -55,8 +55,12 @@ export function createRelayDispatchToolFactory(transport: RelayTransport | undef
 
         const text =
           result.status === "accepted"
-            ? `Relay dispatch accepted (dispatchId: ${result.dispatchId}). Task posted to ${targetAgentId} channel. Response will be forwarded automatically.`
-            : `Relay dispatch ${result.status}: ${result.message}${result.code ? ` [${result.code}]` : ""}${result.retryable ? " (retryable)" : ""}`;
+            ? /idempotent replay/i.test(result.message)
+              ? `Relay dispatch accepted as idempotent replay (dispatchId: ${result.dispatchId}). No new message was posted to ${targetAgentId}; this reused a previously completed dispatch for the same requestId.`
+              : `Relay dispatch accepted (dispatchId: ${result.dispatchId}). Task posted to ${targetAgentId} channel. Response will be forwarded automatically.`
+            : result.code === "DISPATCH_IN_FLIGHT"
+              ? `Relay dispatch blocked: a dispatch with this requestId is already in flight for ${targetAgentId} (dispatchId: ${result.dispatchId}). No new message was posted. Wait for that result, or retry with a fresh unique requestId if you intend a new dispatch.`
+              : `Relay dispatch ${result.status}: ${result.message}${result.code ? ` [${result.code}]` : ""}${result.retryable ? " (retryable)" : ""}`;
 
         return {
           content: [{ type: "text", text }],

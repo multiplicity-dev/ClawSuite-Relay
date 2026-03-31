@@ -19,6 +19,15 @@ Prioritized list of pending work, from concrete to speculative. Created 2026-02-
 - [x] **Full system test** — all 12 agents dispatched and returned successfully, including 4-way parallel dispatch with synthesis (2026-02-28)
 - [x] **Q. All-directional relay** — all 13 agents wired with `tools.alsoAllow: ["relay_dispatch"]`. CEO added to channel map (was missing, caused RELAY_UNAVAILABLE on inbound). Shared TOOLS.md content (Subagent Policy, Discord Channels, Session Keys) deployed to all 13 workspaces. Config-only, no code changes. (2026-02-28)
 - [x] **Naive subject propensity test** — CEO dispatched to Life Coach ("message the life coach that this is just a test"). Life Coach received via relay and responded naturally. CEO used `relay_dispatch` without prompting — explained it was guided by TOOLS.md Subagent Policy loaded as project context. Key finding: OpenClaw injects workspace files (TOOLS.md, SOUL.md, etc.) on every turn, not just at session start. No new session or gateway restart needed for agents to pick up TOOLS.md changes — content is live immediately. This explains why all agents adopted relay dispatch on first contact after the wiring change. (2026-02-28)
+- [x] **Return-hop timeout + stale-dispatch loop hardening** — fixed two live failure modes seen in CLO↔translator relay work on 2026-03-16:
+  - `GatewayForwardTransport` no longer uses `--expect-final` when injecting the translator result back into the orchestrator session. Relay success is now keyed to gateway acceptance of the injected message, not to CLO finishing a user-facing answer within 60s.
+  - `llm_output` failure handling now terminalizes failed forwards: dispatch moves `POSTED_TO_CHANNEL` → `SUBAGENT_RESPONDED` → `FAILED` on gateway-forward error, `lastError` is recorded, and the agent is disarmed so stale `requestId`s cannot idempotent-replay a dead dispatch forever.
+  - Regression coverage added in `test/openclaw-plugin.test.ts` for the stale-armed-dispatch case. (2026-03-16)
+- [x] **Immediate duplicate + source-identity fail-closed hardening** — fixed two preventive gaps exposed by CLO↔translator relay behavior on 2026-03-16:
+  - Reused `requestId`s are no longer re-accepted while a dispatch is still live. Duplicate calls against `POSTED_TO_CHANNEL` / `SUBAGENT_RESPONDED` now fail closed with `DISPATCH_IN_FLIGHT` instead of returning a misleading `accepted`.
+  - Relay dispatch now requires a real orchestrator agent identity, and Discord posting requires a matching source profile. If that context is missing, the dispatch fails loudly instead of landing in the target channel as generic `relay` branding.
+  - Old replayable dispatches now expire after a bounded TTL (default 6h) rather than matching forever.
+  - Regression coverage added in `test/relay-dispatch.test.ts` and `test/transport-discord.test.ts`. (2026-03-16)
 
 ---
 

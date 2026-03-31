@@ -20,9 +20,9 @@ Status: Milestone 1 — PRIMARY BLOCKER RESOLVED. Capture + delivery working (se
 ## 2. Interfaces (Contracts)
 ### 2.1 relay_dispatch
 Request:
-- `targetAgentId` (required, string): currently must be `systems-eng` in v1
+- `targetAgentId` (required, string): must have a configured relay mapping
 - `task` (required, string): orchestrator-formulated dispatch prompt
-- `requestId` (optional, string): idempotency key; duplicate requestIds return existing dispatch record
+- `requestId` (optional, string): idempotency key; must be unique per intended relay step
 - `options` (optional object):
   - `priority` (`normal` default)
   - `replyMode` (`auto-forward` default)
@@ -33,18 +33,22 @@ Response:
 - `code`: stable machine code
   - `TARGET_UNMAPPED`
   - `RELAY_UNAVAILABLE`
-  - `MENTION_POLICY_BLOCKED`
+  - `DISPATCH_IN_FLIGHT`
   - `RATE_LIMITED`
   - `INVALID_PAYLOAD`
 - `message`: human-readable status detail
 - `retryable`: boolean
+
+Current duplicate semantics:
+- If the same `requestId` is reused while the earlier dispatch is still `POSTED_TO_CHANNEL` or `SUBAGENT_RESPONDED`, relay returns `failed/DISPATCH_IN_FLIGHT` and does not post a new message.
+- If the prior dispatch is `COMPLETED`, relay may return the existing dispatch as an idempotent replay.
+- If the prior non-completed replayable dispatch is older than `CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`, relay expires it, marks it `FAILED`, and creates a fresh dispatch.
 
 ## 3. State Model
 Lifecycle states:
 - `CREATED`
 - `POSTED_TO_CHANNEL`
 - `SUBAGENT_RESPONDED`
-- `FORWARDED_TO_ORCHESTRATOR`
 - `COMPLETED`
 - `FAILED`
 
@@ -66,7 +70,9 @@ Persistence:
 - Timeouts and retries:
   - dispatch posting retry: 2 attempts with short backoff for transient API errors
   - subagent response timeout: default 10 minutes, then mark `FAILED` with `SUBAGENT_TIMEOUT`
-  - idempotent retry via `requestId`
+  - `requestId` is not a blind retry token; live duplicates fail with `DISPATCH_IN_FLIGHT`
+  - stale replayable non-completed dispatches are expired after `CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`
+  - missing orchestrator/source identity fails closed instead of silently posting under generic relay branding
 
 ## 5. Security Controls
 - token handling:
@@ -77,10 +83,13 @@ Persistence:
   - relay dispatch accepted only from orchestrator-controlled path (plugin/tool boundary)
 - message authenticity checks:
   - dispatch payload includes dispatchId + source marker; hook only forwards messages that match active dispatch expectations
+- source identity checks:
+  - dispatch posting requires a valid `sourceAgentId` with configured source profile metadata
+  - if source identity/profile is missing, dispatch fails loudly before posting
 
 ## 6. Observability
 - required logs:
-  - dispatch created, posted, response captured, forwarded, completed, failed
+  - dispatch created, posted, response captured, completed, failed
 - correlation IDs:
   - `dispatchId` attached to all logs/events/messages
 - dashboard/grep views:

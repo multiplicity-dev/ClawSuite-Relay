@@ -67,15 +67,16 @@ test("postToChannel retries on transient 502 then succeeds", async () => {
     const result = await transport.postToChannel({
       dispatchId: "d-retry-1",
       targetAgentId: "systems-eng",
-      task: "test task"
+      task: "test task",
+      sourceAgentId: "ceo"
     });
     assert.equal(result.messageId, "msg-123");
     assert.equal(callCount, 2, "should have retried once after 502");
     assert.deepEqual(sleepCalls, [2000], "should use 2s server-error backoff");
     assert.equal(urls[0], "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token?wait=true");
-    assert.equal(bodies[0]?.username, "relay", "source fallback should be relay");
+    assert.equal(bodies[0]?.username, "CEO");
     assert.deepEqual(bodies[0]?.allowed_mentions, { parse: [] });
-    assert.equal(bodies[0]?.avatar_url, undefined);
+    assert.equal(bodies[0]?.avatar_url, "https://example.com/ceo.png");
 
     const profiled = await transport.postToChannel({
       dispatchId: "d-retry-1b",
@@ -104,12 +105,13 @@ test("postToChannel does not retry on non-transient 403", async () => {
   try {
     const transport = new DiscordRelayTransport({
       webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
+      sourceProfilesByAgent: { ceo: { username: "CEO" } },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
     });
     await assert.rejects(
-      () => transport.postToChannel({ dispatchId: "d-retry-2", targetAgentId: "systems-eng", task: "test" }),
+      () => transport.postToChannel({ dispatchId: "d-retry-2", targetAgentId: "systems-eng", task: "test", sourceAgentId: "ceo" }),
       /Discord post failed \(403\)/
     );
     assert.equal(callCount, 1, "should not retry on 403");
@@ -135,6 +137,7 @@ test("postToChannel retries on thrown network error then succeeds", async () => 
   try {
     const transport = new DiscordRelayTransport({
       webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
+      sourceProfilesByAgent: { ceo: { username: "CEO" } },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -142,7 +145,8 @@ test("postToChannel retries on thrown network error then succeeds", async () => 
     const result = await transport.postToChannel({
       dispatchId: "d-retry-3",
       targetAgentId: "systems-eng",
-      task: "test"
+      task: "test",
+      sourceAgentId: "ceo"
     });
     assert.equal(result.messageId, "msg-456");
     assert.equal(callCount, 2, "should retry once after network error");
@@ -173,6 +177,7 @@ test("postToChannel uses fallback Retry-After when header is invalid", async () 
   try {
     const transport = new DiscordRelayTransport({
       webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
+      sourceProfilesByAgent: { ceo: { username: "CEO" } },
       sleepFn: async (ms) => {
         sleepCalls.push(ms);
       }
@@ -180,7 +185,8 @@ test("postToChannel uses fallback Retry-After when header is invalid", async () 
     const result = await transport.postToChannel({
       dispatchId: "d-retry-4",
       targetAgentId: "systems-eng",
-      task: "test"
+      task: "test",
+      sourceAgentId: "ceo"
     });
     assert.equal(result.messageId, "msg-789");
     assert.equal(callCount, 2, "should retry once after 429");
@@ -195,7 +201,18 @@ test("postToChannel rejects invalid webhook URL", async () => {
     webhooksByAgent: { "systems-eng": "not-a-webhook-url" }
   });
   await assert.rejects(
-    () => transport.postToChannel({ dispatchId: "d-invalid-webhook", targetAgentId: "systems-eng", task: "test" }),
+    () => transport.postToChannel({ dispatchId: "d-invalid-webhook", targetAgentId: "systems-eng", task: "test", sourceAgentId: "ceo" }),
     /Invalid Discord webhook URL/
+  );
+});
+
+test("postToChannel rejects missing source profile", async () => {
+  const transport = new DiscordRelayTransport({
+    webhooksByAgent: { "systems-eng": "https://discord.com/api/webhooks/12345678901234567890/fake-hook-token" },
+    sourceProfilesByAgent: {}
+  });
+  await assert.rejects(
+    () => transport.postToChannel({ dispatchId: "d-missing-profile", targetAgentId: "systems-eng", task: "test", sourceAgentId: "ceo" }),
+    /Missing source profile/
   );
 });
