@@ -5,18 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const testDir = await mkdtemp(join(tmpdir(), "clawsuite-relay-plugin-test-"));
+const armedDir = await mkdtemp(join(tmpdir(), "clawsuite-relay-plugin-armed-test-"));
 process.env.CLAWSUITE_RELAY_DISPATCH_DIR = testDir;
+process.env.CLAWSUITE_RELAY_ARMED_DIR = armedDir;
 process.env.CLAWSUITE_RELAY_SILENT_LOGS = "1";
 process.env.CLAWSUITE_RELAY_ENABLED = "1";
 process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID = "1474868861525557308";
-process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON = '{"systems-eng":"9999999999999999999"}';
+process.env.CLAWSUITE_RELAY_WEBHOOK_MAP_JSON = '{"systems-eng":"https://discord.com/api/webhooks/9999999999999999999/test-token"}';
 
 const { default: register } = await import("../src/openclaw-plugin.js");
 const { relay_dispatch } = await import("../src/index.js");
-const { saveDispatch, loadDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
+const { saveDispatch, loadDispatch, getArmedDispatch, setArmedDispatch, clearArmedDispatch } = await import("../src/state.js");
 
 test.after(async () => {
   await rm(testDir, { recursive: true, force: true });
+  await rm(armedDir, { recursive: true, force: true });
 });
 
 function createMockApi() {
@@ -30,77 +33,34 @@ function createMockApi() {
   return { api, hooks, tools };
 }
 
-test("registers hooks and relay_dispatch tool", () => {
+test("registers hooks and relay_dispatch tool factory", () => {
   const { api, hooks, tools } = createMockApi();
   register(api);
 
-  assert.equal(typeof hooks.message_received, "function");
-  assert.equal(typeof hooks.message_sending, "function");
-  assert.equal(typeof hooks.before_message_write, "function");
-  assert.equal(typeof hooks.agent_end, "function");
+  assert.equal(typeof hooks.llm_output, "function");
+  assert.equal(hooks.message_received, undefined);
+  assert.equal(hooks.agent_end, undefined);
   assert.equal(tools.length, 1);
-  assert.equal(tools[0].tool.name, "relay_dispatch");
-  assert.equal(typeof tools[0].tool.execute, "function");
+  assert.equal(typeof tools[0].tool, "function");
+  // message_sending is intentionally not registered (self-identity repost path removed)
+  assert.equal(hooks.message_sending, undefined);
 });
 
-test("message_received is no-op for non-discord channel", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const result = await hooks.message_received(
-    { content: "ignored", metadata: { channelId: "systems-eng-channel", messageId: "x" } },
-    { channelId: "slack", conversationId: "systems-eng-channel" }
-  );
-
-  assert.equal(result, undefined);
+test("does not register message_sending hook even when legacy self-identity flag is set", () => {
+  process.env.CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON = '{"999":"systems-eng"}';
+  process.env.CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED = "1";
+  try {
+    const { api, hooks } = createMockApi();
+    register(api);
+    assert.equal(hooks.message_sending, undefined);
+    assert.equal(typeof hooks.llm_output, "function");
+  } finally {
+    delete process.env.CLAWSUITE_RELAY_CHANNEL_AGENT_MAP_JSON;
+    delete process.env.CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED;
+  }
 });
 
-test("message_received bails when content missing", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const result = await hooks.message_received(
-    { content: "", metadata: { channelId: "systems-eng-channel", messageId: "x2" } },
-    { channelId: "discord", conversationId: "systems-eng-channel" }
-  );
-
-  assert.equal(result, undefined);
-});
-
-test("message_sending cancels transient announce when correlated dispatch exists", async () => {
-  const { api, hooks } = createMockApi();
-  register(api);
-
-  const dispatch = await relay_dispatch(
-    { targetAgentId: "systems-eng", task: "work", requestId: "plugin-send-1" },
-    { transport: { async postToChannel() { return { messageId: "post-plugin-1" }; } } }
-  );
-
-  // Move to suppressible state by simulating capture+forward via direct state path:
-  await hooks.message_received(
-    {
-      content: "done",
-      metadata: {
-        channelId: "systems-eng-channel",
-        messageId: "sub-plugin-1",
-        referencedMessageId: "post-plugin-1"
-      }
-    },
-    { channelId: "discord", conversationId: "systems-eng-channel" }
-  );
-
-  const result = await hooks.message_sending(
-    {
-      content: `subagent completed [relay_dispatch_id:${dispatch.dispatchId}]`,
-      metadata: { channelId: "1474868861525557308" }
-    },
-    { channelId: "discord", conversationId: "1474868861525557308" }
-  );
-
-  assert.deepEqual(result, { cancel: true });
-});
-
-test("before_message_write captures only after dispatch is armed", async () => {
+test("llm_output captures only after dispatch is armed", async () => {
   const dispatchId = "00000000-0000-1000-8000-000000000077";
   await saveDispatch({
     dispatchId,
@@ -119,39 +79,39 @@ test("before_message_write captures only after dispatch is armed", async () => {
   await clearArmedDispatch("systems-eng");
 
   // Without arming, should no-op.
-  const noArm = await hooks.before_message_write(
-    {
-      message: { role: "assistant", content: "here is my analysis" },
-      agentId: "systems-eng"
-    },
+  const noArm = await hooks.llm_output(
+    { assistantTexts: ["here is my analysis"] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
   assert.equal(noArm, undefined);
   const stillPending = await loadDispatch(dispatchId);
   assert.equal(stillPending?.state, "POSTED_TO_CHANNEL");
 
-  // Arm directly via persistent state (relay_dispatch now sets this in runtime).
-  await setArmedDispatch("systems-eng", dispatchId);
+  // Arm with orchestrator session key — gateway delivery will fail in test.
+  // The dispatch must be terminalized and disarmed so stale requestIds
+  // cannot loop indefinitely on later attempts.
+  await setArmedDispatch("systems-eng", dispatchId, "agent:ceo:test:session");
 
-  const armed = await hooks.before_message_write(
-    {
-      message: { role: "assistant", content: "here is my analysis" },
-      agentId: "systems-eng"
-    },
+  const armed = await hooks.llm_output(
+    { assistantTexts: ["here is my analysis"] },
     { agentId: "systems-eng", sessionKey: "agent:systems-eng:test" }
   );
 
   assert.equal(armed, undefined);
+  const updated = await loadDispatch(dispatchId);
+  assert.equal(updated?.state, "FAILED");
+  assert.match(updated?.lastError ?? "", /Gateway delivery failed/);
+  const disarmed = await getArmedDispatch("systems-eng");
+  assert.equal(disarmed, null);
 });
 
-test("relay_dispatch tool executes dispatch with mock transport", async () => {
-  const { tools } = createMockApi();
-  // Build tool directly with a mock transport
-  const { createRelayDispatchTool } = await import("../src/relay-dispatch-tool.js");
+test("relay_dispatch tool factory produces working tool", async () => {
+  const { createRelayDispatchToolFactory } = await import("../src/relay-dispatch-tool.js");
   const mockTransport = {
     async postToChannel() { return { messageId: "tool-post-1" }; }
   };
-  const tool = createRelayDispatchTool(mockTransport);
+  const factory = createRelayDispatchToolFactory(mockTransport);
+  const tool = factory({ sessionKey: "agent:ceo:test:session", agentId: "ceo" });
 
   const result = await tool.execute("call-1", {
     targetAgentId: "systems-eng",
@@ -163,4 +123,3 @@ test("relay_dispatch tool executes dispatch with mock transport", async () => {
   assert.equal(result.details.status, "accepted");
   assert.ok(result.details.dispatchId);
 });
-

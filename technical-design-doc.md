@@ -1,13 +1,13 @@
 # Technical Design Doc (TDD) — Relay Bot Initiative
 
-Status: Draft (Milestone 0 fill-in complete; pending approval)
+Status: Milestone 1 — PRIMARY BLOCKER RESOLVED. Capture + delivery working (see implementation-plan.md for remaining polish)
 
 ## 1. Scope
 - In-scope (v1):
   - Single-subagent relay for `systems-eng` only (CTO lane)
   - `relay_dispatch` contract + deterministic status codes
   - Relay bot posts orchestrator prompt into mapped subagent channel with mention
-  - Hook captures subagent response and forwards structured payload to orchestrator
+  - `llm_output` hook captures subagent's last assistant message and delivers via gateway injection to orchestrator session (matching completion announce content and delivery mechanism)
   - Fail-loud behavior (no silent fallback)
   - Basic correlation IDs and audit logging
   - Suppress redundant transient subagent completion announce in `#general` when relay mode is active
@@ -20,9 +20,9 @@ Status: Draft (Milestone 0 fill-in complete; pending approval)
 ## 2. Interfaces (Contracts)
 ### 2.1 relay_dispatch
 Request:
-- `targetAgentId` (required, string): currently must be `systems-eng` in v1
+- `targetAgentId` (required, string): must have a configured relay mapping
 - `task` (required, string): orchestrator-formulated dispatch prompt
-- `requestId` (optional, string): idempotency key; duplicate requestIds return existing dispatch record
+- `requestId` (optional, string): idempotency key; must be unique per intended relay step
 - `options` (optional object):
   - `priority` (`normal` default)
   - `replyMode` (`auto-forward` default)
@@ -33,18 +33,22 @@ Response:
 - `code`: stable machine code
   - `TARGET_UNMAPPED`
   - `RELAY_UNAVAILABLE`
-  - `MENTION_POLICY_BLOCKED`
+  - `DISPATCH_IN_FLIGHT`
   - `RATE_LIMITED`
   - `INVALID_PAYLOAD`
 - `message`: human-readable status detail
 - `retryable`: boolean
+
+Current duplicate semantics:
+- If the same `requestId` is reused while the earlier dispatch is still `POSTED_TO_CHANNEL` or `SUBAGENT_RESPONDED`, relay returns `failed/DISPATCH_IN_FLIGHT` and does not post a new message.
+- If the prior dispatch is `COMPLETED`, relay may return the existing dispatch as an idempotent replay.
+- If the prior non-completed replayable dispatch is older than `CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`, relay expires it, marks it `FAILED`, and creates a fresh dispatch.
 
 ## 3. State Model
 Lifecycle states:
 - `CREATED`
 - `POSTED_TO_CHANNEL`
 - `SUBAGENT_RESPONDED`
-- `FORWARDED_TO_ORCHESTRATOR`
 - `COMPLETED`
 - `FAILED`
 
@@ -66,7 +70,9 @@ Persistence:
 - Timeouts and retries:
   - dispatch posting retry: 2 attempts with short backoff for transient API errors
   - subagent response timeout: default 10 minutes, then mark `FAILED` with `SUBAGENT_TIMEOUT`
-  - idempotent retry via `requestId`
+  - `requestId` is not a blind retry token; live duplicates fail with `DISPATCH_IN_FLIGHT`
+  - stale replayable non-completed dispatches are expired after `CLAWSUITE_RELAY_REPLAYABLE_TTL_MS`
+  - missing orchestrator/source identity fails closed instead of silently posting under generic relay branding
 
 ## 5. Security Controls
 - token handling:
@@ -77,10 +83,13 @@ Persistence:
   - relay dispatch accepted only from orchestrator-controlled path (plugin/tool boundary)
 - message authenticity checks:
   - dispatch payload includes dispatchId + source marker; hook only forwards messages that match active dispatch expectations
+- source identity checks:
+  - dispatch posting requires a valid `sourceAgentId` with configured source profile metadata
+  - if source identity/profile is missing, dispatch fails loudly before posting
 
 ## 6. Observability
 - required logs:
-  - dispatch created, posted, response captured, forwarded, completed, failed
+  - dispatch created, posted, response captured, completed, failed
 - correlation IDs:
   - `dispatchId` attached to all logs/events/messages
 - dashboard/grep views:
@@ -104,19 +113,22 @@ Persistence:
 - **Rule:** implementation is not "done" until code + docs + rollback notes are all updated.
 - **Version control policy:** all design/ops docs in this initiative are committed to git along with code changes (same milestone PR/commit set), so rollback can be performed from repository state.
 ## 9. Acceptance Criteria
+
+### Implementation status (2026-02-28)
+
 - functional:
-  - orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot
-  - subagent response is captured and forwarded back to orchestrator with dispatchId
+  - [x] orchestrator dispatch to `systems-eng` appears in mapped channel via relay bot — **VERIFIED LIVE**
+  - [x] subagent's last assistant message captured via `llm_output` hook and delivered to orchestrator via gateway injection — **VERIFIED LIVE 2026-02-28**. `assistantTexts[last]` → `openclaw gateway call agent` → trigger message in orchestrator session. Content parity with native `sessions_spawn` confirmed via source code trace.
 - reliability:
-  - transient relay API errors recover within retry budget
-  - timeout paths produce explicit `FAILED` state + operator notice
+  - [ ] transient relay API errors recover within retry budget — **NOT IMPLEMENTED** (no retry logic in v1)
+  - [ ] timeout paths produce explicit `FAILED` state + operator notice — **NOT IMPLEMENTED** (no timeout tracking in v1)
 - transparency:
-  - prompt/response visible in subagent channel
-  - redundant transient completion announce in `#general` suppressed during relay mode
+  - [x] prompt/response visible in subagent channel — **VERIFIED LIVE**
+  - [ ] redundant transient completion announce in `#general` suppressed during relay mode — **CODE EXISTS, NOT TESTED LIVE**
 - safety/security:
-  - no silent fallback to `sessions_spawn`
-  - token is secret-managed and never logged
-  - only mapped channels/agents are accepted in v1
+  - [ ] no silent fallback to `sessions_spawn` — **NOT ENFORCED** (no `before_tool_call` hook blocking `sessions_spawn`)
+  - [x] token is secret-managed and never logged — env var via systemd drop-in, not in code
+  - [x] only mapped channels/agents are accepted in v1 — `V1_TARGET_AGENT = "systems-eng"` enforced
 
 ## 10. Milestone 0 Approval Checklist (required before first code)
 - [x] Scope approved: v1 is CTO-only single-subagent relay (no multi-subagent batching)

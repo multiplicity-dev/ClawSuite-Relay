@@ -1,17 +1,66 @@
-# ClawSuite-Relay
+# ClawSuite Relay
 
-Relay-first orchestration bridge for OpenClaw.
+Persistent inter-agent delegation for OpenClaw.
 
-Routes orchestrator delegation into subagent channels for transparent prompt/response visibility, persistent subagent context, and fail-loud reliability.
+ClawSuite Relay is an OpenClaw plugin for work that should stay in an agent's main channel session instead of disappearing into transient helper sessions.
 
-## Project docs
-- `relay-bot-plan.md` — architecture and rationale
-- `technical-design-doc.md` — implementation contract + documentation policy
-- `implementation-plan.md` — milestones and acceptance gates
-- `dev-log.md` — chronological decisions/evidence
-- `test-validation-plan.md` — validation checklist and evidence format
+It exists for a specific failure mode:
 
-## Development
+- one specialist hands work to another
+- the handoff disappears into private orchestration
+- the receiving agent loses continuity
+- the operator loses the trail of who did what and why
+
+Relay keeps that crossing visible. It dispatches into the target agent's own channel session, preserves correlation across the handoff, and returns the result through a traceable relay path.
+
+## What it is good for
+
+- persistent specialist delegation
+- readable operator oversight
+- cross-model or cross-role work over multiple turns
+- quality-control or review lanes
+- round-robin and ping-pong patterns that need continuity instead of arbitrary queuing
+
+## Example topology
+
+The canonical example configuration uses named organizational roles:
+
+- `ceo` as orchestrator
+- `systems-eng` or `cto` as technical specialist
+- `cfo`, `clo`, and other functional roles as additional specialists
+
+That framing is intentional. It is one of the clearest ways to demonstrate why Relay matters.
+
+It is still just an example topology. Your deployment can use any agent names and channel structure you want.
+
+## Why not just use `sessions_spawn`?
+
+OpenClaw's transient subagent flow is useful for one-shot parallel work.
+
+Relay is for a different shape of task:
+
+- the specialist should work in its existing channel context
+- the handoff should stay visible
+- the operator should be able to audit what happened
+- the same specialist may need to respond again later without losing the thread
+
+## Current installation model
+
+This repo is currently a **clone-and-install local plugin** for OpenClaw.
+
+It is not yet published as an npm package. The expected path today is:
+
+1. clone the repo
+2. install dependencies
+3. install it into OpenClaw as a local plugin
+4. configure Discord webhook and channel mapping
+
+## Quickstart
+
+See [docs/quickstart.md](docs/quickstart.md) for the public setup path.
+
+Minimal development commands:
+
 ```bash
 npm install
 npm run typecheck
@@ -19,89 +68,74 @@ npm test
 npm run build
 ```
 
-Current implementation status: Milestone 1 — dispatch path verified, return path (capture/forward) BLOCKED. See `live-activation-runbook.md` for details.
+## What the plugin does
 
-## Prerequisite: Create a second Discord bot
+ClawSuite Relay wires three main behaviors into OpenClaw:
 
-ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages (self-message filter), so a second bot identity is needed for relay messages to be visible to subagent sessions.
+- `relay_dispatch` tool registration for orchestrator-side dispatch
+- outbound dispatch posting into mapped Discord channels
+- return-path capture and delivery back to the orchestrator session
 
-1. Go to https://discord.com/developers/applications → "New Application"
-2. Name it (e.g., "ClawSuite-Relay")
-3. Go to Bot tab → "Reset Token" → copy the token
-4. Go to OAuth2 → URL Generator → select `bot` scope → set permissions to `2048` (Send Messages)
-5. Use the generated invite URL to add the bot to your Discord server
-6. Decode the bot's user ID for config: `echo -n "<token_prefix_before_first_dot>" | base64 -d`
+Operationally, that supports patterns like:
 
-The relay bot appears with its own name and visual styling in Discord, which provides clear visual distinction between orchestrator relay dispatches and direct subagent messages.
+- dispatch to a specialist
+- visible approval / restart / confirmation loops
+- round-robin review between multiple agents
+- cross-model continuous work without throwing away specialist context
 
-## Discord transport wiring (env config)
-Configure via environment variables (typically in a systemd drop-in):
-- `CLAWSUITE_RELAY_BOT_TOKEN` — the **relay bot's** token (not the main OpenClaw bot token)
-- `CLAWSUITE_RELAY_CHANNEL_MAP_JSON` — JSON map of `targetAgentId -> channelId`
-- `CLAWSUITE_RELAY_MENTION_MAP_JSON` — optional JSON map of `targetAgentId -> userId` for mention gating
-- `CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID` — orchestrator channel id for forwarded subagent responses and suppression scope
-- `CLAWSUITE_RELAY_ENABLED` — `1` (default) or `0` to disable runtime hook behavior
-- `CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES` — `1` (default) to auto-delete relay envelope messages in orchestrator channel after receipt
+## Key behaviors
 
-Example systemd drop-in (`~/.config/systemd/user/openclaw-gateway.service.d/clawsuite-relay.conf`):
-```ini
-[Service]
-Environment=CLAWSUITE_RELAY_ENABLED=1
-Environment=CLAWSUITE_RELAY_BOT_TOKEN=<relay_bot_token>
-Environment=CLAWSUITE_RELAY_CHANNEL_MAP_JSON="{\"systems-eng\":\"1474868861525557308\"}"
-Environment=CLAWSUITE_RELAY_MENTION_MAP_JSON="{\"systems-eng\":\"794579141801934879\"}"
-Environment=CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID=1474838614197141729
-```
+### Dispatch correlation
 
-## OpenClaw runtime hook wiring
-This repo includes an OpenClaw plugin entrypoint (`index.ts` + `openclaw.plugin.json`) that wires:
-- `message_received` → subagent response capture (for messages from external bots)
-- `message_sending` → outbound capture (for agent responses to subagent channels) + announce suppression
-- `relay_dispatch` tool → orchestrator can dispatch tasks to subagent channels
+Each accepted dispatch receives a `dispatchId`. That ID is used internally to correlate:
 
-**Note:** The `message_sending` hook pipeline is confirmed working for all outbound messages (verified via gateway source analysis). The current blocking issue is that systems-eng (GPT-5.3) posts empty-content responses to relay dispatches. See `live-activation-runbook.md` for details and investigation next steps.
+- the original relay request
+- the armed target state
+- the captured response
+- the orchestrator-side delivery
 
-Typical local load path:
-```bash
-openclaw plugins install -l /home/dave/projects/ClawSuite-Relay
-openclaw plugins enable clawsuite-relay
-openclaw gateway restart
-```
+### Dispatch semantics
 
-## OpenClaw config requirements (`openclaw.json`)
+- `requestId` should be unique per intended relay step
+- reusing a live `requestId` now fails closed with `DISPATCH_IN_FLIGHT`
+- stale replayable dispatches can expire instead of matching forever
+- missing source identity/profile fails loudly instead of posting under generic relay branding
 
-The plugin registers a `relay_dispatch` tool, but OpenClaw requires explicit agent-level configuration for tool visibility and bot message handling.
+### Source identity
 
-### Tool visibility
-Each agent that should call `relay_dispatch` needs it in `tools.alsoAllow`:
-```json
-{
-  "id": "ceo",
-  "tools": {
-    "alsoAllow": ["relay_dispatch"]
-  }
-}
-```
+Per-origin identity is driven by `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON`.
 
-### Bot message handling
-The relay bot uses a separate Discord bot token. By default, OpenClaw ignores bot messages (`allowBots: false`). To allow the relay bot's messages to reach subagent sessions:
-```json
-{
-  "channels": {
-    "discord": {
-      "allowBots": true,
-      "allowFrom": ["<human_user_id>", "<relay_bot_user_id>"],
-      "guilds": {
-        "<guild_id>": {
-          "users": ["<human_user_id>", "<relay_bot_user_id>"]
-        }
-      }
-    }
-  }
-}
-```
-The relay bot's user ID can be decoded from its token: `echo -n "<token_prefix_before_first_dot>" | base64 -d`.
+In practical terms, if an agent is expected to dispatch via Relay, it should have an explicit source profile. Current behavior fails closed rather than silently branding the post as generic `relay`.
 
-## Known deferred UX items
-- @mention noise: Relay posts @mention the human user for routing, but this is unnecessary when `requireMention: false` is set. The mention map currently targets the human user, not the OpenClaw bot.
-- Visible dispatch markers: `[relay_dispatch_id:...]` in channel messages is functional for correlation but noisy for casual reading. Could be moved to Discord embed metadata in a future phase.
+## Known constraints
+
+- Discord's message size limit can split long responses across multiple messages. If that happens, downstream model behavior may not always treat the sequence as a single coherent return. This should be treated as a current limitation, not a solved problem.
+- Relay is stronger for continuity than cron-style sequencing, but stalled exchanges and long chains still need explicit monitoring and recovery strategy.
+- Some of the most interesting use cases, including watchdog-assisted resume of broken ping-pongs or round robins, are still roadmap territory.
+
+## Documentation map
+
+- [docs/quickstart.md](docs/quickstart.md) — public setup path
+- [technical-design-doc.md](technical-design-doc.md) — implementation contract and design constraints
+- [implementation-plan.md](implementation-plan.md) — milestone history and remaining work
+- [feature-backlog.md](feature-backlog.md) — backlog and follow-on ideas
+- [design-decisions.md](design-decisions.md) — major trade-offs and rationale
+- [assistant-text-analysis.md](assistant-text-analysis.md) — deep dive on assistant text capture surfaces
+- [layer-disambiguation.md](layer-disambiguation.md) — analysis of relay surfaces and delivery semantics
+
+Some of these documents still reflect the project's internal evolution and example topology. They are being cleaned up for broader public readability rather than treated as private by default.
+
+## Public release status
+
+Relay is already in active internal use.
+
+This repo is being prepared for a proper public release:
+
+- clearer public framing
+- sanitized setup path
+- public license
+- tighter separation between public docs and internal operating notes
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

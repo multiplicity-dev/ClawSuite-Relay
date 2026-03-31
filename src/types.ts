@@ -1,12 +1,13 @@
-export const V1_TARGET_AGENT = "systems-eng" as const;
-
 export const RELAY_CODES = {
-  TARGET_UNMAPPED: "TARGET_UNMAPPED",
+  /** Transport or persistence failure (retryable). */
   RELAY_UNAVAILABLE: "RELAY_UNAVAILABLE",
+  /** Request validation failure — bad or missing fields, payload too large. */
+  INVALID_PAYLOAD: "INVALID_PAYLOAD",
+  // Reserved for future phases (Phase 4: reliability & hardening):
   MENTION_POLICY_BLOCKED: "MENTION_POLICY_BLOCKED",
   RATE_LIMITED: "RATE_LIMITED",
-  INVALID_PAYLOAD: "INVALID_PAYLOAD",
-  SUBAGENT_TIMEOUT: "SUBAGENT_TIMEOUT"
+  SUBAGENT_TIMEOUT: "SUBAGENT_TIMEOUT",
+  DISPATCH_IN_FLIGHT: "DISPATCH_IN_FLIGHT"
 } as const;
 
 export type RelayCode = (typeof RELAY_CODES)[keyof typeof RELAY_CODES];
@@ -17,10 +18,6 @@ export interface RelayDispatchRequest {
   targetAgentId: string;
   task: string;
   requestId?: string;
-  options?: {
-    priority?: "normal";
-    replyMode?: "auto-forward";
-  };
 }
 
 export interface RelayDispatchResponse {
@@ -31,11 +28,15 @@ export interface RelayDispatchResponse {
   retryable: boolean;
 }
 
+/**
+ * Dispatch lifecycle: CREATED → POSTED_TO_CHANNEL → COMPLETED (or FAILED).
+ * SUBAGENT_RESPONDED is an intermediate state set when capture fires
+ * before gateway delivery completes.
+ */
 export type DispatchState =
   | "CREATED"
   | "POSTED_TO_CHANNEL"
   | "SUBAGENT_RESPONDED"
-  | "FORWARDED_TO_ORCHESTRATOR"
   | "COMPLETED"
   | "FAILED";
 
@@ -43,11 +44,13 @@ export interface DispatchRecord {
   dispatchId: string;
   requestId?: string;
   targetAgentId: string;
+  sourceAgentId?: string;
   task: string;
   state: DispatchState;
   postedMessageId?: string;
   subagentResponseMessageId?: string;
   forwardedMessageId?: string;
+  lastError?: string;
   createdAt: string;
   updatedAt: string;
 }

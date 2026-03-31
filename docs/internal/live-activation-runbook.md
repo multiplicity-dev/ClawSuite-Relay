@@ -1,45 +1,48 @@
 # ClawSuite-Relay Live Activation Runbook
 
-## Current status (2026-02-27)
-- Plugin installed as local link and loaded (`clawsuite-relay`).
-- Runtime hook wiring: `message_received` (inbound capture) + `message_sending` (outbound capture + announce suppression).
-- `relay_dispatch` tool registered via plugin, visible to agents with `tools.alsoAllow`.
-- Separate relay bot created ("ClawSuite-Relay") with distinct Discord identity.
-- Systemd drop-in for relay env vars configured with relay bot token.
-- `allowBots: true` + relay bot user ID in `openclaw.json` allowlists.
-- **Step 1 complete:** gateway restarted, plugin loaded, no transport errors.
-- **Step 2 complete:** plugin confirmed loaded in gateway logs.
-- **Smoke Test A (dispatch post path):** PASS — orchestrator calls `relay_dispatch`, message posted to subagent channel with dispatch marker. Systems-eng receives and processes the message.
-- **Smoke Tests B–D:** BLOCKED — return path does not work (see blocking issue below).
+## Current status (2026-02-28)
 
-### BLOCKING ISSUE: Return path — systems-eng posts empty-content Discord messages
+**Phase 1 COMPLETE.** Core relay loop verified: dispatch → channel post → `llm_output` capture → gateway injection delivery. Content parity with native `sessions_spawn` confirmed. See `implementation-plan.md` for remaining phases.
 
-The capture/forward code is correct and tested. The hook pipeline is confirmed working (gateway source code analysis verified `message_sending` fires for ALL outbound messages including embedded agent responses). The blocking issue is **upstream**: systems-eng (GPT-5.3) produces responses with empty text content.
+### Remaining Phase 1 verification
+- [ ] Test C: suppress redundant transient announce (code exists, untested live)
+- [ ] Test D: fail-loud path (code exists, untested live)
 
-Full observed timeline (06:27 dispatch):
-```
-06:27:42.058  dispatch.created
-06:27:42.437  relay bot posts to #tech (messageId=1476828121293652080)
-06:27:42.595  message_received fires (relay bot's own message bounces back)
-06:27:43.470  systems-eng session enqueued on its Discord channel lane
-06:27:43.490  systems-eng embedded run starts (gpt-5.3-codex)
-06:27:50.552  systems-eng run ends (isError=false, 7s)
-06:27:50.902  OpenClaw bot posts to #tech — BUT message content is completely empty
-```
+---
 
-**Discord API evidence:** `GET /channels/1474868861525557308/messages?limit=5` (via relay bot token) shows messages posted by the OpenClaw bot at 06:27:50.902 and 06:14:31 with empty `content`, no `embeds`, and no `attachments`. Both correspond to relay dispatch responses. The gateway delivered a message, but there was nothing in it.
+## Resolved blockers
 
-**Impact on capture:** The plugin's `message_sending` handler has `if (!content) return` as an early bail guard. Even without this guard, `captureOutboundResponse` would have nothing to forward. The capture/forward code is correct but there is nothing to capture.
+**PRIMARY BLOCKER — RESOLVED (2026-02-28):** `llm_output` → `assistantTexts[last]` → `GatewayForwardTransport` → `openclaw gateway call agent`. Gateway injection matches native `sendSubagentAnnounceDirectly` delivery path. Content parity verified via source code trace — thinking tokens stripped at every level, no provider-specific gating.
 
-**Key question:** Why does systems-eng (GPT-5.3) produce empty response content for relay-dispatched prompts?
-1. Does the relay message format (`@mention` + `[relay_dispatch_id:...]` markers) confuse the model into a tool-only or empty response?
-2. Is the response text stripped by the OpenClaw delivery pipeline before Discord posting?
-3. Does the session context or system prompt cause GPT-5.3 to respond differently to bot-authored messages?
+**Relay envelope in #general — RESOLVED by architecture change.** No Discord mirror to #general. Subagent output stays in subagent channel (path a). Orchestrator receives via gateway injection (path b). No envelope to auto-delete.
 
-**Next steps to investigate:**
-- Check systems-eng's session JSONL for the 06:27 run to see the raw model response
-- Try a dispatch with simpler content (no markers, no mention) to isolate the cause
-- Add temporary logging in `message_sending` that fires regardless of content to confirm hook execution
+**Duplicate forward — RESOLVED.** `llm_output` is the sole capture path. `agent_end` gated behind `CLAWSUITE_RELAY_USE_AGENT_END_FALLBACK=1` (off by default). `message_sending` handles only announce suppression.
+
+### Key architectural findings from troubleshooting
+
+1. **In-memory arming does not work.** The plugin is re-initialized per agent session. When the CTO channel receives a dispatch, OpenClaw spawns a new embedded session which loads a fresh plugin instance. Any in-memory Map state from the dispatching session is lost. This is why commits `85bce9c` through `3c4558e` (which used in-memory arming) never completed the loop in live testing.
+
+2. **Disk-persisted arming at dispatch time works.** Commit `a9606d9` moved arming to the `relay_dispatch` function itself (writes `armed/<agentId>.json` after posting to channel). The CTO's fresh plugin instance reads this file from disk in `before_message_write`. This is the fix that made the loop work.
+
+3. **`message_sending` does not fire for embedded agent responses.** Confirmed across multiple test sessions. The hook fires for gateway-originated messages (e.g., CEO posting to #general) but NOT for subagent responses in embedded sessions.
+
+4. **`before_message_write` fires reliably for all agent message writes.** Gateway logs show "returned a Promise; this hook is synchronous and the result was ignored" warnings, but async side effects (capture/forward) still execute successfully.
+
+5. **`message.content` can be an array.** `extractAssistantTextFromAgentMessage()` handles both string and array content formats. Using `asString(event?.message?.content)` alone misses array-format content.
+
+### Commit reference map
+
+| Commit | Status | Key change |
+|--------|--------|-----------|
+| `d48b633` | Dispatch works, return path missing | Claude Code baseline (pre-GPT) |
+| `85bce9c` | Loop incomplete | Added `before_message_write` with in-memory arming |
+| `c12a969` | Loop incomplete | Strengthened echo guards (arming still in-memory) |
+| `0bf72f5` | Docs only (same code as c12a969) | GPT marked loop complete (may have worked transiently due to warm session) |
+| `9289028` | Loop incomplete | Added echo prevention but placed it before arming (blocks arming) |
+| `3c4558e` | Loop incomplete | Moved arming before echo prevention (still in-memory — doesn't survive session restart) |
+| `a9606d9` | **LOOP WORKS, duplicate forward** | Disk-persisted arming at dispatch time — the key fix |
+| `92c2bdb` | Untested (had test failures at HEAD) | Attempted atomic arming |
+| `a3b806f` | 6 tests failing | Added forward lock (referenced undefined function) |
 
 ## Why this runbook exists
 To let either systems-eng or Claude Code finish activation and testing with a clear handoff checklist.
@@ -56,6 +59,17 @@ Control actions (restart/enable/disable/reconfigure) must be authorized only by 
 ### Second Discord bot (REQUIRED)
 
 ClawSuite-Relay requires a **separate Discord bot** from the main OpenClaw bot. OpenClaw unconditionally filters its own messages, so relay messages from the same bot identity are invisible to subagent sessions. See README.md for setup steps.
+
+### Orchestrator reference docs (REQUIRED)
+
+The orchestrator (CEO) must know about relay channel IDs, session keys, and `sessions_history` usage. Update the orchestrator's TOOLS.md (or equivalent reference file) with:
+- Relay bot identity and dispatch tool syntax
+- Session keys for relay-bound agents (for `sessions_history` access)
+- Guidance to use `sessions_history` with a small `limit` (10-20) since relay session keys point to main channel sessions, not bounded transient sessions
+
+**Current location:** `~/.openclaw/workspace/TOOLS.md` (shared workspace, accessible to CEO)
+
+Without this, the orchestrator may not know it can access subagent working via `sessions_history`, and may pull entire channel histories without a limit.
 
 ### Tool visibility (REQUIRED)
 
@@ -104,13 +118,14 @@ Expected: `clawsuite-relay` loaded, relay and forward transports initialized. Co
 - Triggered orchestrator relay dispatch for `systems-eng`.
 - Relay bot posted to mapped subagent channel (#tech).
 - Dispatch marker present: `[relay_dispatch_id:8afe4945-d854-4b72-a399-1f31fa67e9e4]`.
-- @mention included for routing (`@climbswithgoats`).
+- No @mention in relay post (current behavior).
 
-### Test B: Capture + forward path [BLOCKED]
-- Reply in subagent channel to relay message.
-- Confirm response is captured and forwarded to orchestrator channel.
-- Confirm forwarded content includes dispatch marker(s).
-- **Blocked by:** systems-eng posts empty-content Discord messages in response to relay dispatches (see blocking issue above).
+### Test B: Capture + forward path [PARTIAL — loop works, content incomplete]
+- CTO responds in subagent channel.
+- Response captured and forwarded to orchestrator channel. CEO receives it.
+- **Duplicate forward resolved:** removing `agent_end` hook eliminated duplicate (dispatchId `537a94a5`).
+- **Content truncation found:** `before_message_write` only captures Discord-visible text (54 chars), not full CTO response. Testing `agent_end` as sole capture path to get full content.
+- **Confirmed loop working at:** commit `a9606d9` (dispatchId `c918869d`, 2026-02-27 12:41 CET).
 
 ### Test C: Suppression path [PENDING]
 - During correlated transient announce in orchestrator channel, confirm suppression cancels redundant announce.
@@ -146,7 +161,7 @@ Expected: `clawsuite-relay` loaded, relay and forward transports initialized. Co
 
 ## Deferred UX issues (observed during live testing)
 - **Bot identity:** Resolved — the separate relay bot ("ClawSuite-Relay") has its own name and visual styling (yellow highlight in Discord), providing clear distinction from OpenClaw's direct messages.
-- **@mention in relay posts:** The relay posts `@username` for routing/gating purposes, but this is confusing to human readers who see themselves mentioned in a machine-to-machine prompt. The mention map currently targets the human user, not the OpenClaw bot. Consider removing the mention since `requireMention: false` makes it unnecessary.
+- **@mention in relay posts:** Resolved — mentions were removed from relay dispatch posts.
 - **Visible dispatch markers:** `[relay_dispatch_id:...]` markers appear in channel messages. Functional for correlation but noisy for casual reading. Consider moving to Discord embed metadata or message components in a future phase.
 
 ---

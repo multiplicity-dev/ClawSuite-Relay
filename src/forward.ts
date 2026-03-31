@@ -3,6 +3,7 @@ export interface ForwardRequest {
   targetAgentId: string;
   subagentMessageId: string;
   content: string;
+  subagentSessionKey?: string;
 }
 
 export interface ForwardResult {
@@ -11,10 +12,4 @@ export interface ForwardResult {
 
 export interface ForwardTransport {
   forwardToOrchestrator(request: ForwardRequest): Promise<ForwardResult>;
-}
-
-export class UnconfiguredForwardTransport implements ForwardTransport {
-  async forwardToOrchestrator(_request: ForwardRequest): Promise<ForwardResult> {
-    throw new Error("Forward transport is not configured");
-  }
 }

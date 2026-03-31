@@ -1,8 +1,7 @@
-import { captureSubagentResponse, captureOutboundResponse } from "./capture.js";
-import { shouldSuppressTransientGeneralAnnounce } from "./announce-filter.js";
-import { transportFromEnv, forwardTransportFromEnv } from "./transport-discord.js";
-import { createRelayDispatchTool } from "./relay-dispatch-tool.js";
-import { consumeArmedDispatch, setArmedDispatch } from "./state.js";
+import { transportFromEnv } from "./transport-discord.js";
+import { createRelayDispatchToolFactory } from "./relay-dispatch-tool.js";
+import { clearArmedDispatch, getArmedDispatch, loadDispatch, updateDispatch } from "./state.js";
+import { GatewayForwardTransport } from "./transport-gateway.js";
 
 interface PluginApi {
   logger: { info?: (msg: string) => void; warn?: (msg: string) => void };
@@ -14,146 +13,8 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function resolveChannelId(event: any, ctx: any): string | undefined {
-  return asString(event?.metadata?.channelId) ?? asString(ctx?.conversationId) ?? asString(event?.to);
-}
-
-function isDiscordHookContext(event: any, ctx: any): boolean {
-  const candidates = [
-    asString(ctx?.channelId),
-    asString(event?.channel),
-    asString(event?.metadata?.channel),
-    asString(event?.metadata?.provider)
-  ];
-  return candidates.some((c) => c === "discord");
-}
-
-function resolveMessageId(event: any): string | undefined {
-  return asString(event?.metadata?.messageId) ?? asString(event?.id) ?? asString(event?.messageId);
-}
-
-function resolveReferencedMessageId(event: any): string | undefined {
-  return (
-    asString(event?.metadata?.referencedMessageId) ??
-    asString(event?.metadata?.replyToMessageId) ??
-    asString(event?.replyToMessageId)
-  );
-}
-
-function resolveRelatedSubagentMessageId(event: any): string | undefined {
-  return asString(event?.metadata?.relatedSubagentMessageId) ?? asString(event?.relatedSubagentMessageId);
-}
-
-function resolveAuthorId(event: any): string | undefined {
-  return (
-    asString(event?.metadata?.authorId) ??
-    asString(event?.authorId) ??
-    asString(event?.author?.id)
-  );
-}
-
-async function deleteDiscordMessage(
-  botToken: string | undefined,
-  channelId: string,
-  messageId: string
-): Promise<void> {
-  if (!botToken) return;
-  await fetch(`https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bot ${botToken}`
-    }
-  });
-}
-
-function deriveDiscordBotUserIdFromToken(token: string | undefined): string | undefined {
-  if (!token) return undefined;
-  const head = token.split(".")[0];
-  if (!head) return undefined;
-  try {
-    const normalized = head.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
-    const decoded = Buffer.from(padded, "base64").toString("utf8");
-    return /^\d+$/.test(decoded) ? decoded : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function resolveOutboundContent(event: any): string {
-  const candidates = [
-    asString(event?.content),
-    asString(event?.text),
-    asString(event?.metadata?.content),
-    asString(event?.payload?.content),
-    asString(event?.message?.content),
-    asString(event?.components?.text)
-  ].filter(Boolean) as string[];
-
-  if (candidates.length > 0) return candidates[0]!;
-
-  const texts = event?.components?.texts;
-  if (Array.isArray(texts)) {
-    const joined = texts.map((t: unknown) => asString(t)).filter(Boolean).join("\n");
-    if (joined.trim()) return joined;
-  }
-
-  return "";
-}
-
-function previewEventShape(event: any): string {
-  const obj = {
-    topKeys: Object.keys(event || {}),
-    hasContent: typeof event?.content === "string",
-    hasText: typeof event?.text === "string",
-    metadataKeys: event?.metadata ? Object.keys(event.metadata) : [],
-    componentKeys: event?.components ? Object.keys(event.components) : []
-  };
-  return JSON.stringify(obj);
-}
-
-function extractAssistantTextFromAgentMessage(message: any): string {
-  const direct = asString(message?.content) ?? asString(message?.text);
-  if (direct) return direct;
-
-  if (Array.isArray(message?.content)) {
-    const joined = message.content
-      .map((part: any) => asString(part?.text) ?? asString(part?.content) ?? asString(part))
-      .filter(Boolean)
-      .join("\n");
-    if (joined.trim()) return joined;
-  }
-
-  if (Array.isArray(message?.parts)) {
-    const joined = message.parts
-      .map((part: any) => asString(part?.text) ?? asString(part?.content))
-      .filter(Boolean)
-      .join("\n");
-    if (joined.trim()) return joined;
-  }
-
-  return "";
-}
-
-function extractLastAssistantText(messages: any[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    const role = asString(msg?.role);
-    if (role !== "assistant") continue;
-    const text = extractAssistantTextFromAgentMessage(msg);
-    if (text) return text;
-  }
-  return "";
-}
-
 export default function register(api: PluginApi) {
   const relayEnabled = process.env.CLAWSUITE_RELAY_ENABLED !== "0";
-  const debugOutbound = process.env.CLAWSUITE_RELAY_DEBUG_OUTBOUND === "1";
-  const orchestratorChannelId = process.env.CLAWSUITE_RELAY_ORCHESTRATOR_CHANNEL_ID;
-  const relayBotToken = process.env.CLAWSUITE_RELAY_BOT_TOKEN;
-  const relayBotUserId = deriveDiscordBotUserIdFromToken(relayBotToken);
-  const autoDeleteOrchestratorEnvelopes =
-    process.env.CLAWSUITE_RELAY_AUTO_DELETE_ORCHESTRATOR_ENVELOPES !== "0";
 
   let relayTransport;
   try {
@@ -163,246 +24,141 @@ export default function register(api: PluginApi) {
     relayTransport = undefined;
   }
 
-  let forwardTransport;
+  // Build webhook map for target-agent membership checks (used by llm_output hook).
+  let webhookMap: Record<string, string> = {};
   try {
-    forwardTransport = forwardTransportFromEnv();
-  } catch (err) {
-    api.logger.warn?.(`clawsuite-relay: forward transport not configured (${String(err)})`);
-    forwardTransport = undefined;
-  }
-
-  // Build channel maps for outbound response capture.
-  let channelMap: Record<string, string> = {};
-  let reverseChannelMap: Record<string, string> = {};
-  try {
-    const rawChannels = process.env.CLAWSUITE_RELAY_CHANNEL_MAP_JSON;
-    if (rawChannels) {
-      channelMap = JSON.parse(rawChannels) as Record<string, string>;
-      for (const [agentId, channelId] of Object.entries(channelMap)) {
-        reverseChannelMap[channelId] = agentId;
-      }
+    const rawWebhooks = process.env.CLAWSUITE_RELAY_WEBHOOK_MAP_JSON;
+    if (rawWebhooks) {
+      webhookMap = JSON.parse(rawWebhooks) as Record<string, string>;
     }
   } catch {
-    // channel map parsing handled by transportFromEnv; no-op here
+    // webhook map parsing handled by transportFromEnv; no-op here
   }
 
-  // Register relay_dispatch as a tool the orchestrator can call.
-  api.registerTool(createRelayDispatchTool(relayTransport));
+  // Register relay_dispatch as a tool factory — the factory receives
+  // OpenClawPluginToolContext (including the orchestrator's sessionKey)
+  // so we can store it in the armed dispatch for later internal delivery.
+  api.registerTool(createRelayDispatchToolFactory(relayTransport));
 
-  api.logger.info?.(`clawsuite-relay: reverse channel map: ${JSON.stringify(reverseChannelMap)}`);
+  const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 1800000);
 
-  const armTtlMs = Number(process.env.CLAWSUITE_RELAY_ARM_TTL_MS || 300000);
+  async function disarmDispatch(agentId: string, dispatchId?: string) {
+    if (!dispatchId) {
+      await clearArmedDispatch(agentId);
+      return;
+    }
+    const armed = await getArmedDispatch(agentId);
+    if (!armed) return;
+    if (armed.dispatchId === dispatchId) {
+      await clearArmedDispatch(agentId);
+    }
+  }
 
-  async function consumeFreshArmedDispatchId(agentId: string): Promise<string | undefined> {
-    const armed = await consumeArmedDispatch(agentId);
-    if (!armed) return undefined;
+  // Primary capture + delivery path: llm_output fires once per agent run
+  // (after agent_end) with pre-extracted assistantTexts[]. We take the LAST
+  // entry only, matching what the completion announce delivers.
+  //
+  // Delivery is INTERNAL ONLY via gateway injection (path b). The subagent's
+  // response still posts to its own Discord channel via normal OpenClaw
+  // message_sending (path a). We do NOT mirror to #general — that was the
+  // "wrong vehicle" identified in layer-disambiguation.md.
+  api.on("llm_output", async (event, ctx) => {
+    if (!relayEnabled) return;
+    const targetAgentId = asString(ctx?.agentId);
+    if (!targetAgentId) return;
+    if (!Object.prototype.hasOwnProperty.call(webhookMap, targetAgentId)) return;
+
+    const armed = await getArmedDispatch(targetAgentId);
+    if (!armed) return;
+
+    // TTL check
     const ts = Date.parse(armed.armedAt || "");
     if (!Number.isNaN(ts) && Date.now() - ts > armTtlMs) {
-      return undefined;
-    }
-    return armed.dispatchId;
-  }
-
-  // Capture subagent replies from Discord inbound messages (fallback path for external bots).
-  api.on("message_received", async (event, ctx) => {
-    if (!isDiscordHookContext(event, ctx)) return;
-    if (!relayEnabled) return;
-
-    if (debugOutbound) {
-      api.logger.info?.(`clawsuite-relay: message_received ctx=${JSON.stringify({ channelId: ctx?.channelId, conversationId: ctx?.conversationId, eventChannel: event?.channel, metaChannel: event?.metadata?.channel, metaProvider: event?.metadata?.provider })}`);
+      await clearArmedDispatch(targetAgentId);
+      return;
     }
 
-    const channelId = resolveChannelId(event, ctx);
-    const messageId = resolveMessageId(event);
-    const content = asString(event?.content) ?? "";
-    if (!channelId || !messageId || !content) return;
+    const armedDispatchId = armed.dispatchId;
 
-    // Ignore relay bot authored messages and forwarded envelopes to avoid echo loops.
-    const authorId = resolveAuthorId(event);
-    const messageId = resolveMessageId(event);
+    const texts = Array.isArray((event as any)?.assistantTexts)
+      ? ((event as any).assistantTexts as string[])
+      : [];
+    const lastText = texts.length > 0 ? texts[texts.length - 1] : "";
+    if (!lastText?.trim()) return;
 
-    // In orchestrator channel, auto-delete relay envelope after receipt to suppress user-visible leak.
-    if (
-      autoDeleteOrchestratorEnvelopes &&
-      orchestratorChannelId &&
-      channelId === orchestratorChannelId &&
-      relayBotUserId &&
-      authorId === relayBotUserId &&
-      messageId &&
-      content.startsWith("Subagent response received for ")
-    ) {
-      try {
-        await deleteDiscordMessage(relayBotToken, channelId, messageId);
-      } catch {
-        // best-effort only
-      }
-    }
-
-    if (relayBotUserId && authorId === relayBotUserId) return;
-    if (content.includes("[relay_subagent_message_id:")) return;
-    if (content.startsWith("Subagent response received for ")) return;
-
-    try {
-      const result = await captureSubagentResponse(
-        {
-          channelId,
-          messageId,
-          content,
-          referencedMessageId: resolveReferencedMessageId(event)
-        },
-        { forwardTransport }
-      );
-
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: captured dispatch ${result.dispatchId}`);
-      }
-      if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: capture failed for dispatch ${result.dispatchId}`);
-      }
-    } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: unexpected capture exception (${String(err)})`);
-    }
-  });
-
-  // Fallback capture at agent_end in case outbound message hooks are inconsistent.
-  api.on("agent_end", async (event, ctx) => {
-    if (!relayEnabled) return;
-    const targetAgentId = asString(ctx?.agentId);
-    if (!targetAgentId) return;
-    if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
-
-    const armedDispatchId = await consumeFreshArmedDispatchId(targetAgentId);
-    if (!armedDispatchId) return;
-
-    const msgs = Array.isArray((event as any)?.messages) ? ((event as any).messages as any[]) : [];
-    const content = extractLastAssistantText(msgs);
-    if (!content) return;
-
-    try {
-      const result = await captureOutboundResponse(
-        { targetAgentId, content, dispatchId: armedDispatchId },
-        { forwardTransport }
-      );
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: agent_end captured dispatch ${result.dispatchId}`);
-        
-      }
-      if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: agent_end capture failed for dispatch ${result.dispatchId}`);
-        if (armedDispatchId) await setArmedDispatch(targetAgentId, armedDispatchId);
-      }
-    } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: agent_end capture error (${String(err)})`);
-    }
-  });
-
-  // Capture assistant text before write as a reliable fallback when outbound hooks vary.
-  api.on("before_message_write", async (event, ctx) => {
-    if (!relayEnabled) return;
-
-    const targetAgentId = asString(ctx?.agentId);
-
-    if (debugOutbound) {
-      api.logger.info?.(
-        `clawsuite-relay: before_message_write debug targetAgentId=${targetAgentId ?? "<none>"} ctx=${JSON.stringify({ agentId: ctx?.agentId, sessionKey: ctx?.sessionKey })} event=${previewEventShape(event)}`
-      );
-    }
-
-    if (!targetAgentId) return;
-    if (!Object.prototype.hasOwnProperty.call(channelMap, targetAgentId)) return;
-
-    const role = asString(event?.message?.role);
-    if (role && role !== "assistant") return;
-
-    const content = extractAssistantTextFromAgentMessage(event?.message);
-    if (!content) return;
-
-    const armedDispatchId = await consumeFreshArmedDispatchId(targetAgentId);
-    if (debugOutbound) {
-      api.logger.info?.(
-        `clawsuite-relay: before_message_write armed targetAgentId=${targetAgentId} armedDispatchId=${armedDispatchId ?? "<none>"} content_len=${content.length}`
-      );
-    }
-    if (!armedDispatchId) return;
-
-    try {
-      const result = await captureOutboundResponse(
-        { targetAgentId, content, dispatchId: armedDispatchId },
-        { forwardTransport }
-      );
-      if (result.status === "processed") {
-        api.logger.info?.(`clawsuite-relay: before_message_write captured dispatch ${result.dispatchId}`);
-        
-      }
-      if (result.status === "failed") {
-        api.logger.warn?.(`clawsuite-relay: before_message_write capture failed for dispatch ${result.dispatchId}`);
-        if (armedDispatchId) await setArmedDispatch(targetAgentId, armedDispatchId);
-      }
-    } catch (err) {
-      api.logger.warn?.(`clawsuite-relay: before_message_write capture error (${String(err)})`);
-    }
-  });
-
-  // Outbound capture + announce suppression (single modifying hook).
-  api.on("message_sending", async (event, ctx) => {
-    if (!isDiscordHookContext(event, ctx)) return;
-
-    const channelId = resolveChannelId(event, ctx);
-    if (!channelId) return;
-
-    const content = resolveOutboundContent(event);
-
-    if (debugOutbound) {
-      api.logger.info?.(
-        `clawsuite-relay: message_sending debug channel=${channelId} content_len=${content.length} shape=${previewEventShape(event)}`
-      );
-    }
-
-    // Outbound capture: if this message is going to a subagent channel with
-    // a pending dispatch, capture the response and forward to orchestrator.
-    // We do NOT cancel — the subagent's message still posts normally.
-    if (relayEnabled) {
-      const targetAgentId = reverseChannelMap[channelId];
-      if (targetAgentId) {
-        if (!content) {
-          api.logger.warn?.(
-            `clawsuite-relay: outbound candidate for ${targetAgentId} had empty content (channel=${channelId})`
-          );
-        } else {
-          try {
-            const result = await captureOutboundResponse(
-              { targetAgentId, content },
-              { forwardTransport }
-            );
-            if (result.status === "processed") {
-              api.logger.info?.(`clawsuite-relay: outbound capture forwarded dispatch ${result.dispatchId}`);
-            }
-            if (result.status === "failed") {
-              api.logger.warn?.(`clawsuite-relay: outbound capture failed for dispatch ${result.dispatchId}`);
-            }
-          } catch (err) {
-            api.logger.warn?.(`clawsuite-relay: outbound capture error (${String(err)})`);
-          }
-        }
-      }
-    }
-
-    // Suppress transient redundant announces in orchestrator channel.
-    const suppress = await shouldSuppressTransientGeneralAnnounce(
-      {
-        channelId,
-        content,
-        relatedSubagentMessageId: resolveRelatedSubagentMessageId(event)
-      },
-      {
-        relayEnabled,
-        orchestratorChannelId
-      }
+    api.logger.info?.(
+      `clawsuite-relay: llm_output fired for ${targetAgentId} dispatch=${armedDispatchId} texts=${texts.length} lastLen=${lastText.length}`
     );
 
-    if (suppress) {
-      api.logger.info?.("clawsuite-relay: suppressed transient orchestrator announce");
-      return { cancel: true };
+    const dispatch = await loadDispatch(armedDispatchId);
+    if (dispatch && dispatch.state === "POSTED_TO_CHANNEL") {
+      await updateDispatch({
+        ...dispatch,
+        state: "SUBAGENT_RESPONDED"
+      });
+    }
+
+    try {
+      // Path (b): Gateway internal delivery to orchestrator session.
+      // This is the sole delivery mechanism — no Discord mirror.
+      if (armed.orchestratorSessionKey) {
+        const gatewayTransport = new GatewayForwardTransport({
+          orchestratorSessionKey: armed.orchestratorSessionKey,
+          orchestratorAgentId: armed.orchestratorAgentId
+        });
+        const gwResult = await gatewayTransport.forwardToOrchestrator({
+          dispatchId: armedDispatchId,
+          targetAgentId,
+          subagentMessageId: armedDispatchId,
+          content: lastText,
+          subagentSessionKey: asString(ctx?.sessionKey)
+        });
+        api.logger.info?.(
+          `clawsuite-relay: llm_output gateway delivery dispatch=${armedDispatchId} id=${gwResult.messageId}`
+        );
+        const updatedDispatch = await loadDispatch(armedDispatchId);
+        if (updatedDispatch && updatedDispatch.state === "SUBAGENT_RESPONDED") {
+          await updateDispatch({
+            ...updatedDispatch,
+            state: "COMPLETED",
+            forwardedMessageId: gwResult.messageId
+          });
+        }
+      } else {
+        api.logger.warn?.(
+          `clawsuite-relay: llm_output no orchestratorSessionKey for dispatch=${armedDispatchId}, skipping gateway delivery`
+        );
+        const updatedDispatch = await loadDispatch(armedDispatchId);
+        if (updatedDispatch && updatedDispatch.state === "SUBAGENT_RESPONDED") {
+          await updateDispatch({
+            ...updatedDispatch,
+            state: "FAILED",
+            lastError: "Missing orchestratorSessionKey for gateway delivery"
+          });
+        }
+        await disarmDispatch(targetAgentId, armedDispatchId);
+        return;
+      }
+      await disarmDispatch(targetAgentId, armedDispatchId);
+    } catch (err) {
+      const updatedDispatch = await loadDispatch(armedDispatchId);
+      if (updatedDispatch && updatedDispatch.state === "SUBAGENT_RESPONDED") {
+        await updateDispatch({
+          ...updatedDispatch,
+          state: "FAILED",
+          lastError: String(err)
+        });
+      }
+      await disarmDispatch(targetAgentId, armedDispatchId);
+      api.logger.warn?.(
+        `clawsuite-relay: llm_output capture error (${String(err)})`
+      );
     }
   });
+
+  if (process.env.CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED === "1") {
+    api.logger.warn?.(
+      "clawsuite-relay: CLAWSUITE_RELAY_SELF_IDENTITY_ENABLED is ignored; self-identity repost hook is disabled due to echo-loop risk"
+    );
+  }
 }
