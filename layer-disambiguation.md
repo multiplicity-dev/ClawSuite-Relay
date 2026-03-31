@@ -132,7 +132,7 @@ With the relay, the subagent responds in its own Discord channel. The relay plug
 
 ### The echo and the conceptual two-path model
 
-Earlier testing with the echo present appeared to show richer content reaching the orchestrator (e.g., tool result `montblanc` alongside channel text `Checked.`). Whether this was a true positive (assistant text actually delivered) or a false positive (tool result leakage from `agent_end` extracting the wrong content blocks) is unresolved.
+Earlier testing with the echo present appeared to show richer content reaching the orchestrator (e.g., a host-name tool result alongside channel text `Checked.`). Whether this was a true positive (assistant text actually delivered) or a false positive (tool result leakage from `agent_end` extracting the wrong content blocks) is unresolved.
 
 However, the conceptual model this suggests may be sound independent of whether our prior data confirmed it: the subagent's turn should produce two effects — (a) posting its response in its own channel (visible to the president directly; the current mirror to #general is an implementation artifact, not part of this design), and (b) delivering the assistant text payload to the orchestrator through a separate, internal path, enabling the orchestrator to respond with richer context than what appears in the channel.
 
