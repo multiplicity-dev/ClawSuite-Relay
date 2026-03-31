@@ -1,7 +1,16 @@
 {
   "name": "clawsuite-relay",
   "version": "0.1.0",
-  "description": "Relay bridge for OpenClaw orchestrator to subagent channels",
+  "description": "Persistent inter-agent delegation for OpenClaw across Discord-backed specialist channels",
+  "license": "Apache-2.0",
+  "keywords": [
+    "openclaw",
+    "agent",
+    "multi-agent",
+    "discord",
+    "relay",
+    "plugin"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "openclaw": {
