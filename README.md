@@ -1,8 +1,9 @@
 # ClawSuite Relay
 
-Persistent inter-agent delegation for OpenClaw.
+Persistent inter-agent delegation for Discord-backed OpenClaw deployments.
 
-ClawSuite Relay is an OpenClaw plugin for work that should stay in an agent's main channel session instead of disappearing into transient helper sessions.
+ClawSuite Relay is an OpenClaw plugin for work that should stay in an agent's main Discord channel
+session instead of disappearing into transient helper sessions.
 
 It exists for a specific failure mode:
 
@@ -12,6 +13,13 @@ It exists for a specific failure mode:
 - the operator loses the trail of who did what and why
 
 Relay keeps that crossing visible. It dispatches into the target agent's own channel session, preserves correlation across the handoff, and returns the result through a traceable relay path.
+
+Current implementation note:
+
+- Relay is currently built for OpenClaw deployments that use Discord channels and webhooks as the
+  relay surface
+- the public docs should be read as describing that OpenClaw-plus-Discord shape, not a
+  channel-agnostic orchestration framework
 
 ## What it is good for
 
