@@ -39,7 +39,7 @@ Prioritized list of pending work, from concrete to speculative. Created 2026-02-
 
 ## Tier 2 — Valuable, needs design decisions
 
-### S. Optional dispatch augmentation for long-chain workflows
+### S. User-owned control-file injection surface for long-chain workflows
 Allow Relay to attach operator-defined control headers or workflow envelopes at dispatch time for
 workflows that depend on strict protocol discipline.
 
@@ -49,12 +49,15 @@ Why this is next:
 - that works, but it depends on the initiating agent remembering to carry the control header
 - Relay already owns the dispatch surface, so it is the natural place to add explicit,
   inspectable scaffolding for long-chain workflows
+- the target shape is a user-owned file surface conceptually similar to `SOUL.md`: blank or absent
+  by default, present when the operator wants Relay to carry that control text consistently
 
 Potential uses:
 
 - reject-condition headers for review lanes
 - workflow envelopes for segmented ping-pong
 - consistent role reminders for high-stakes quality-control loops
+- route-specific control overlays for particular agent pairs or patterns
 
 Constraints:
 
@@ -62,6 +65,7 @@ Constraints:
 - must remain visible to the operator
 - must not blur the line between transport and hidden prompt manipulation
 - should support operator-defined patterns rather than one baked-in lab protocol
+- should preserve clear authorship: the user owns the injected text, Relay only attaches it
 
 ### F. Phase 3 routing enforcement (likely unnecessary)
 Propensity test showed CEO defaults to relay without enforcement. Naive subject test (Life Coach) confirmed: agents follow TOOLS.md policy on first contact without priming. **Enforcement is almost certainly unnecessary.** Revisit only if an agent demonstrably ignores the policy under load.

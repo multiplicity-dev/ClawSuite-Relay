@@ -122,11 +122,13 @@ Relay mechanics from task-specific protocol overlays.
 
 Planned next step:
 
-- optional dispatch augmentation for long-chain workflows, allowing Relay to attach
+- a user-owned control-file injection surface for long-chain workflows, allowing Relay to attach
   operator-defined control headers or workflow envelopes at dispatch time
 
-The goal is to make high-discipline relay patterns more reliable without turning the control layer
-into hidden behavior. This is intended to be explicit, inspectable, and opt-in.
+Conceptually, this plays a role similar to `SOUL.md` or other workspace guidance files: the user
+owns the text, Relay applies it consistently, and the default state can be blank or absent. The
+goal is to make high-discipline relay patterns more reliable without turning the control layer into
+hidden behavior. This is intended to be explicit, inspectable, and opt-in.
 
 ## Current installation model
 
