@@ -21,6 +21,43 @@ Relay keeps that crossing visible. It dispatches into the target agent's own cha
 - quality-control or review lanes
 - round-robin and ping-pong patterns that need continuity instead of arbitrary queuing
 
+For longer chains, segmented review loops, or persistent quality-control workflows, lightweight
+workflow scaffolding can improve reliability. See [docs/soft-control.md](docs/soft-control.md).
+
+## Canonical use cases
+
+### 1. Continuous work across persistent lanes
+
+One recurring pattern is to keep a workstream moving across two agents that share the same
+workspace but keep separate channel sessions.
+
+That gives you:
+
+- continuity in the shared working files
+- separate histories for the participating roles
+- a visible handoff instead of invisible orchestration
+- relief from trying to keep everything alive inside one overstretched turn
+
+This can be implemented as true specialist-to-specialist delegation, but it does not require two
+deeply different agents. In some deployments the second lane is mainly there to let the primary
+agent continue naturally without stretching a single session until quality degrades.
+
+### 2. Persistent quality-control lane
+
+Another strong fit is a standing review or quality-control role.
+
+Instead of spawning a disposable reviewer, Relay lets the reviewer work in its own persistent
+channel, challenge the work, and send it back through a readable exchange.
+
+That pattern works for:
+
+- two-agent ping-pong review
+- multi-agent round-robin critique
+- cross-model checking where a different model is better at pressure-testing than initiating
+
+The key distinction is that review becomes an ongoing role with continuity rather than a one-shot
+subagent call.
+
 ## Example topology
 
 The canonical example configuration uses named organizational roles:
@@ -43,6 +80,45 @@ Relay is for a different shape of task:
 - the handoff should stay visible
 - the operator should be able to audit what happened
 - the same specialist may need to respond again later without losing the thread
+
+## Why not just use hooks or cron?
+
+Hooks and cron can sequence work, but they do not by themselves provide a persistent organizational
+lane for the receiving agent.
+
+That matters when the receiving role needs:
+
+- its own ongoing session history
+- its own channel or operator-visible work surface
+- back-and-forth rather than fire-and-forget delivery
+- continuity strong enough to preserve review, authority, or caution across turns
+
+If the only problem is "run the next thing after this thing," hooks may be enough. Relay is for
+cases where sequencing is not the hard part; preserving identity, continuity, and visible handoff
+is.
+
+## Soft control for long chains
+
+Some relay patterns work out of the box with little extra structure. Others benefit from explicit
+workflow discipline once the chain gets long or stateful.
+
+Observed in practice:
+
+- model families vary in how well they maintain relay discipline across long chains
+- segmented review and ping-pong workflows are more reliable when scope, ownership, and return
+  shape are explicit
+- this is workflow guidance, not a transport requirement
+
+See [docs/soft-control.md](docs/soft-control.md) for a reusable control pattern that separates
+Relay mechanics from task-specific protocol overlays.
+
+Planned next step:
+
+- optional dispatch augmentation for long-chain workflows, allowing Relay to attach
+  operator-defined control headers or workflow envelopes at dispatch time
+
+The goal is to make high-discipline relay patterns more reliable without turning the control layer
+into hidden behavior. This is intended to be explicit, inspectable, and opt-in.
 
 ## Current installation model
 
@@ -116,6 +192,7 @@ In practical terms, if an agent is expected to dispatch via Relay, it should hav
 ## Documentation map
 
 - [docs/quickstart.md](docs/quickstart.md) — public setup path
+- [docs/soft-control.md](docs/soft-control.md) — workflow discipline for long relay chains
 - [technical-design-doc.md](technical-design-doc.md) — implementation contract and design constraints
 - [implementation-plan.md](implementation-plan.md) — milestone history and remaining work
 - [feature-backlog.md](feature-backlog.md) — backlog and follow-on ideas
