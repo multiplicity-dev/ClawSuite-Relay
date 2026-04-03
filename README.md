@@ -94,6 +94,15 @@ Relay is for a different shape of task:
 Hooks and cron can sequence work, but they do not by themselves provide a persistent organizational
 lane for the receiving agent.
 
+In many real cron-driven agent setups, that distinction is stronger than it first sounds:
+
+- the scheduled run starts in a fresh isolated session
+- the agent has no memory of the prior scheduled turn
+- continuity exists only insofar as it has been externalized to files
+
+That makes many cron-style agent loops structurally closer to repeated cold starts than to a
+persistent specialist role.
+
 That matters when the receiving role needs:
 
 - its own ongoing session history
@@ -101,9 +110,9 @@ That matters when the receiving role needs:
 - back-and-forth rather than fire-and-forget delivery
 - continuity strong enough to preserve review, authority, or caution across turns
 
-If the only problem is "run the next thing after this thing," hooks may be enough. Relay is for
-cases where sequencing is not the hard part; preserving identity, continuity, and visible handoff
-is.
+If the only problem is "run the next thing after this thing," hooks or cold-start cron may be
+enough. Relay is for cases where sequencing is not the hard part; preserving identity, continuity,
+and visible handoff is.
 
 ## Soft control for long chains
 
@@ -224,6 +233,7 @@ webhook authors.
 
 - [docs/quickstart.md](docs/quickstart.md) — public setup path
 - [docs/soft-control.md](docs/soft-control.md) — workflow discipline for long relay chains
+- [docs/internal/experiments/experiment-registry.md](docs/internal/experiments/experiment-registry.md) — internal experiment index for structured relay field evidence
 - [technical-design-doc.md](technical-design-doc.md) — implementation contract and design constraints
 - [implementation-plan.md](implementation-plan.md) — milestone history and remaining work
 - [feature-backlog.md](feature-backlog.md) — backlog and follow-on ideas
@@ -232,6 +242,11 @@ webhook authors.
 - [layer-disambiguation.md](layer-disambiguation.md) — analysis of relay surfaces and delivery semantics
 
 Some of these documents still reflect the project's internal evolution and example topology. They are being cleaned up for broader public readability rather than treated as private by default.
+
+Important internal practice:
+
+- meaningful relay experiments should not live only as anecdotes
+- use the internal experiment registry and template to capture intentional variations, run observations, and product implications when the result may matter later
 
 ## Public release status
 
