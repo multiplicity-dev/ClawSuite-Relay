@@ -77,6 +77,20 @@ At minimum:
 - `allowBots: true`
 - each webhook author ID included in the relevant allowlists
 
+Important distinction:
+
+- the allowlisted ID must be the webhook author ID, which is the webhook ID in the webhook URL
+- do not put the target Discord channel ID into `allowFrom` / guild `users` and expect relay ingress to work
+- the channel ID still belongs in Discord channel bindings and channel allow maps
+
+Example:
+
+```text
+webhook URL: https://discord.com/api/webhooks/<webhook_id>/<token>
+webhook author ID for allowlists: <webhook_id>
+target channel ID for bindings/maps: <channel_id>
+```
+
 The exact structure depends on your OpenClaw Discord provider config.
 
 ## First validation
@@ -105,6 +119,7 @@ Expected result:
 ## What to watch for
 
 - If the dispatch appears in Discord but the target agent never processes it, your webhook/bot allowlist path is the first place to check.
+- In that failure mode, verify that you allowlisted the webhook author ID from the webhook URL, not the channel ID.
 - If long replies get split by Discord, downstream behavior may not always treat the sequence as one coherent return. This is a known limitation.
 - If the source agent has no configured source profile, Relay should now fail closed instead of posting under generic branding.
 

@@ -193,6 +193,27 @@ Per-origin identity is driven by `CLAWSUITE_RELAY_SOURCE_PROFILE_MAP_JSON`.
 
 In practical terms, if an agent is expected to dispatch via Relay, it should have an explicit source profile. Current behavior fails closed rather than silently branding the post as generic `relay`.
 
+### Discord ingress allowlists
+
+Relay dispatches are posted into target channels via Discord webhooks. OpenClaw must be configured
+to accept those webhook authors on ingress.
+
+In practical terms:
+
+- `allowBots: true` must be enabled for the Discord provider
+- each relay webhook author ID must be present in the relevant Discord allowlists
+- the allowlisted ID is the webhook ID from the webhook URL, not the Discord channel ID
+
+Example:
+
+- webhook URL: `https://discord.com/api/webhooks/<webhook_id>/<token>`
+- webhook author ID for `allowFrom` / guild `users`: `<webhook_id>`
+- target channel ID for bindings / channel maps: `<channel_id>` (separate value)
+
+If a dispatch appears in the target Discord channel but the target agent never reacts, the webhook
+author allowlist is the first thing to check. OpenClaw otherwise drops relay posts from unknown
+webhook authors.
+
 ## Known constraints
 
 - Discord's message size limit can split long responses across multiple messages. If that happens, downstream model behavior may not always treat the sequence as a single coherent return. This should be treated as a current limitation, not a solved problem.

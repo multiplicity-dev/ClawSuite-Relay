@@ -24,8 +24,8 @@ Status: Phase 2 COMPLETE. All-directional relay wired (2026-02-28). Naive subjec
 
 ### Deployment prerequisites (done)
 - [x] Plugin tools require `tools.alsoAllow: ["relay_dispatch"]` in per-agent config (`openclaw.json`)
-- [x] Relay bot messages require `allowBots: true` + relay bot user ID in `users` allowlist (`openclaw.json`)
-- [x] Separate Discord bot ("ClawSuite-Relay") — OpenClaw drops its own bot's messages
+- [x] Relay webhook messages require `allowBots: true` + webhook author IDs in Discord `allowFrom` / guild `users` allowlists (`openclaw.json`)
+- [x] Separate relay transport identity from the OpenClaw bot identity — OpenClaw drops its own bot's messages, and webhook-posted relay ingress must be explicitly allowlisted
 
 ### Remaining Phase 1 verification
 - [ ] **Suppress redundant transient announce** — code exists (`shouldSuppressTransientGeneralAnnounce`), needs one live test (Test C in runbook)
